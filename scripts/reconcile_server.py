@@ -40,7 +40,8 @@ ALL_EXTENSIONS = {
     ".vit",
 }
 
-TEXT_EXTENSIONS = {".LOG", ".MER", ".out", ".vit"}
+TEXT_EXTENSIONS = {".LOG", ".MER", ".vit"}
+OUT_EXTENSION = ".out"
 
 IGNORE_POLICY = [
     ".cmd intentionally excluded: operational request history, mutable operational/request files, and not part of the flat processing archive",
@@ -156,7 +157,13 @@ def scan_tree(
     if root.is_file():
         files = [root]
     else:
-        files = (path for path in root.rglob("*") if path.is_file())
+        files = (
+            path
+            for path in root.rglob("*")
+            if path.is_file()
+            and ".git" not in path.parts
+            and "__pycache__" not in path.parts
+        )
 
     for path in files:
         resolved = path.resolve()
@@ -261,9 +268,9 @@ def resolve_text_group(basename: str, candidates: list[Candidate]) -> Resolution
                 continue
 
             if record.has_timestamp:
-                # Regression guard: a single .out file may contain two different
-                # mermaid REQUEST:<same timestamp> lines. Preserve same-file
-                # repeats; only different candidate files can conflict.
+                # Regression guard: one file may contain two different records
+                # for the same timestamp. Preserve same-file repeats; only
+                # different candidate files can conflict.
                 for previous in timestamp_records[record.key]:
                     if previous.path == record.path:
                         continue
@@ -299,6 +306,69 @@ def resolve_text_group(basename: str, candidates: list[Candidate]) -> Resolution
 
     action = "merged_deduplicated" if duplicate_seen else "merged_disjoint"
     return Resolution(action=action, merged_content=merged_content)
+
+
+def parse_out_blocks(candidate: Candidate) -> tuple[list[bytes], Difference | None]:
+    blocks = []
+    current_block: list[bytes] = []
+    seen_first_block = False
+
+    for line_number, line in enumerate(read_lines(candidate.path), 1):
+        if line.startswith(b"***"):
+            if current_block:
+                blocks.append(b"".join(current_block))
+            current_block = [line]
+            seen_first_block = True
+            continue
+
+        if not seen_first_block:
+            if line.strip():
+                return blocks, Difference(
+                    candidate.path,
+                    candidate.path,
+                    line_number,
+                    None,
+                    line,
+                    None,
+                )
+            continue
+
+        current_block.append(line)
+
+    if current_block:
+        blocks.append(b"".join(current_block))
+
+    return blocks, None
+
+
+def resolve_out_group(basename: str, candidates: list[Candidate]) -> Resolution:
+    """.out files are session logs: merge exact session blocks, not lines."""
+    # Regression cases: [block1] + [block2] safely becomes [block1, block2],
+    # while [block1] + [block1, block2] keeps block1 only once.
+    merged_blocks = []
+    seen_blocks: set[bytes] = set()
+
+    for candidate in candidates:
+        blocks, difference = parse_out_blocks(candidate)
+        if difference is not None:
+            return Resolution(
+                action="conflicts",
+                conflict=Conflict(
+                    basename=basename,
+                    candidates=candidates,
+                    difference=difference,
+                ),
+            )
+        for block in blocks:
+            if block in seen_blocks:
+                continue
+            seen_blocks.add(block)
+            merged_blocks.append(block)
+
+    merged_content = b"".join(merged_blocks)
+    if same_content_as_dest(merged_content, candidates):
+        return Resolution(action="already_current")
+    return Resolution(action="merged_out_blocks", merged_content=merged_content)
 
 
 def resolve_binary_group(basename: str, candidates: list[Candidate]) -> Resolution:
@@ -339,6 +409,8 @@ def resolve_group(basename: str, candidates: list[Candidate]) -> Resolution:
             return Resolution(action="already_current")
         return Resolution(action="copied_identical", winner=first)
 
+    if Path(basename).suffix == OUT_EXTENSION:
+        return resolve_out_group(basename, candidates)
     if is_text_file(basename):
         return resolve_text_group(basename, candidates)
     return resolve_binary_group(basename, candidates)
@@ -378,6 +450,7 @@ def format_counts(counts: Counter[str]) -> str:
         "basenames_considered",
         "copied_single",
         "copied_identical",
+        "merged_out_blocks",
         "merged_disjoint",
         "merged_deduplicated",
         "already_current",
