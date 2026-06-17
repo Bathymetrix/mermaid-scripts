@@ -16,7 +16,7 @@ import shutil
 import subprocess
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 
 
@@ -83,15 +83,6 @@ class Conflict:
 
 
 @dataclass(frozen=True)
-class Record:
-    key: tuple[str, bytes]
-    line: bytes
-    path: Path
-    line_number: int
-    has_timestamp: bool
-
-
-@dataclass(frozen=True)
 class Resolution:
     action: str
     winner: Candidate | None = None
@@ -104,21 +95,13 @@ def parse_args() -> argparse.Namespace:
         description="Merge MERMAID server files into one flat destination."
     )
     parser.add_argument(
-        "--src",
-        action="append",
-        type=Path,
-        help="Source directory. May be supplied multiple times.",
+        "--src", action="append", type=Path, help="Source directory. May be supplied multiple times."
     )
     parser.add_argument(
-        "--dest",
-        type=Path,
-        default=Path(DEFAULT_DEST),
-        help=f"Flat destination directory. Default: {DEFAULT_DEST}",
+        "--dest", type=Path, default=DEFAULT_DEST, help=f"Flat destination directory. Default: {DEFAULT_DEST}"
     )
     parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Analyze and print reports without writing files.",
+        "--dry-run", action="store_true", help="Analyze and print reports without writing files."
     )
     return parser.parse_args()
 
@@ -142,8 +125,8 @@ def is_candidate_file(path: Path) -> bool:
     return has_allowed_suffix
 
 
-def is_text_file(basename: str) -> bool:
-    return Path(basename).suffix in TEXT_EXTENSIONS
+def candidate_sort_key(candidate: Candidate) -> tuple[bool, str]:
+    return (candidate.is_dest, str(candidate.path))
 
 
 def scan_tree(
@@ -209,6 +192,42 @@ def find_conflict_pair(candidates: list[Candidate]) -> Difference:
     return first_difference(candidates[0], candidates[-1])
 
 
+def conflict_resolution(
+    basename: str, candidates: list[Candidate], difference: Difference | None = None
+) -> Resolution:
+    return Resolution(
+        action="conflicts",
+        conflict=Conflict(
+            basename=basename,
+            candidates=candidates,
+            difference=difference or find_conflict_pair(candidates),
+        ),
+    )
+
+
+def all_identical(candidates: list[Candidate]) -> bool:
+    first = candidates[0]
+    return all(
+        filecmp.cmp(first.path, candidate.path, shallow=False)
+        for candidate in candidates[1:]
+    )
+
+
+def identical_or_single_resolution(candidates: list[Candidate]) -> Resolution | None:
+    if len(candidates) == 1:
+        only = candidates[0]
+        if only.is_dest:
+            return Resolution(action="already_current")
+        return Resolution(action="copied_single", winner=only)
+
+    if all_identical(candidates):
+        if any(candidate.is_dest for candidate in candidates):
+            return Resolution(action="already_current")
+        return Resolution(action="copied_identical", winner=candidates[0])
+
+    return None
+
+
 def timestamp_key(line: bytes) -> bytes | None:
     for pattern in TIMESTAMP_PATTERNS:
         match = pattern.search(line)
@@ -227,22 +246,12 @@ def record_key(line: bytes) -> tuple[tuple[str, bytes], bool]:
     return ("line", line), False
 
 
-def iter_records(candidate: Candidate) -> list[Record]:
-    records = []
+def iter_records(candidate: Candidate):
     for line_number, line in enumerate(read_lines(candidate.path), 1):
         if not line.strip():
             continue
         key, has_timestamp = record_key(line)
-        records.append(
-            Record(
-                key=key,
-                line=line,
-                path=candidate.path,
-                line_number=line_number,
-                has_timestamp=has_timestamp,
-            )
-        )
-    return records
+        yield key, line, candidate.path, line_number, has_timestamp
 
 
 def same_content_as_dest(content: bytes, candidates: list[Candidate]) -> bool:
@@ -254,53 +263,54 @@ def same_content_as_dest(content: bytes, candidates: list[Candidate]) -> bool:
 
 def resolve_text_group(basename: str, candidates: list[Candidate]) -> Resolution:
     """Merge text records by timestamp key when obvious, else by full line."""
-    output_records: list[Record] = []
+    output_records = []
     seen_exact_lines: dict[bytes, set[Path]] = defaultdict(set)
-    timestamp_records: dict[tuple[str, bytes], list[Record]] = defaultdict(list)
+    timestamp_records: dict[tuple[str, bytes], list[tuple[Path, int, bytes]]] = (
+        defaultdict(list)
+    )
     duplicate_seen = False
 
     for candidate in candidates:
-        for record in iter_records(candidate):
-            previous_line_paths = seen_exact_lines[record.line]
-            if previous_line_paths and record.path not in previous_line_paths:
+        for key, line, path, line_number, has_timestamp in iter_records(candidate):
+            previous_line_paths = seen_exact_lines[line]
+            if previous_line_paths and path not in previous_line_paths:
                 duplicate_seen = True
-                previous_line_paths.add(record.path)
+                previous_line_paths.add(path)
                 continue
 
-            if record.has_timestamp:
+            if has_timestamp:
                 # Regression guard: one file may contain two different records
                 # for the same timestamp. Preserve same-file repeats; only
                 # different candidate files can conflict.
-                for previous in timestamp_records[record.key]:
-                    if previous.path == record.path:
+                for previous_path, previous_line_number, previous_line in timestamp_records[
+                    key
+                ]:
+                    if previous_path == path:
                         continue
-                    if previous.line != record.line:
-                        return Resolution(
-                            action="conflicts",
-                            conflict=Conflict(
-                                basename=basename,
-                                candidates=candidates,
-                                difference=Difference(
-                                    previous.path,
-                                    record.path,
-                                    previous.line_number,
-                                    record.line_number,
-                                    previous.line,
-                                    record.line,
-                                ),
+                    if previous_line != line:
+                        return conflict_resolution(
+                            basename,
+                            candidates,
+                            Difference(
+                                previous_path,
+                                path,
+                                previous_line_number,
+                                line_number,
+                                previous_line,
+                                line,
                             ),
                         )
-                timestamp_records[record.key].append(record)
+                timestamp_records[key].append((path, line_number, line))
 
-            previous_line_paths.add(record.path)
-            output_records.append(record)
+            previous_line_paths.add(path)
+            output_records.append((key, line, path, line_number, has_timestamp))
 
-    if output_records and all(record.has_timestamp for record in output_records):
+    if output_records and all(record[-1] for record in output_records):
         output_records.sort(
-            key=lambda record: (record.key, str(record.path), record.line_number)
+            key=lambda record: (record[0], str(record[2]), record[3])
         )
 
-    merged_content = b"".join(record.line for record in output_records)
+    merged_content = b"".join(record[1] for record in output_records)
     if same_content_as_dest(merged_content, candidates):
         return Resolution(action="already_current")
 
@@ -351,14 +361,7 @@ def resolve_out_group(basename: str, candidates: list[Candidate]) -> Resolution:
     for candidate in candidates:
         blocks, difference = parse_out_blocks(candidate)
         if difference is not None:
-            return Resolution(
-                action="conflicts",
-                conflict=Conflict(
-                    basename=basename,
-                    candidates=candidates,
-                    difference=difference,
-                ),
-            )
+            return conflict_resolution(basename, candidates, difference)
         for block in blocks:
             if block in seen_blocks:
                 continue
@@ -371,53 +374,15 @@ def resolve_out_group(basename: str, candidates: list[Candidate]) -> Resolution:
     return Resolution(action="merged_out_blocks", merged_content=merged_content)
 
 
-def resolve_binary_group(basename: str, candidates: list[Candidate]) -> Resolution:
-    dest_candidates = [candidate for candidate in candidates if candidate.is_dest]
-
-    if len(candidates) == 1:
-        only = candidates[0]
-        if only.is_dest:
-            return Resolution(action="already_current")
-        return Resolution(action="copied_single", winner=only)
-
-    first = candidates[0]
-    if all(filecmp.cmp(first.path, candidate.path, shallow=False) for candidate in candidates[1:]):
-        if dest_candidates:
-            return Resolution(action="already_current")
-        return Resolution(action="copied_identical", winner=first)
-
-    return Resolution(
-        action="conflicts",
-        conflict=Conflict(
-            basename=basename,
-            candidates=candidates,
-            difference=find_conflict_pair(candidates),
-        ),
-    )
-
-
 def resolve_group(basename: str, candidates: list[Candidate]) -> Resolution:
-    if len(candidates) == 1:
-        only = candidates[0]
-        if only.is_dest:
-            return Resolution(action="already_current")
-        return Resolution(action="copied_single", winner=only)
-
-    first = candidates[0]
-    if all(filecmp.cmp(first.path, candidate.path, shallow=False) for candidate in candidates[1:]):
-        if any(candidate.is_dest for candidate in candidates):
-            return Resolution(action="already_current")
-        return Resolution(action="copied_identical", winner=first)
+    if resolution := identical_or_single_resolution(candidates):
+        return resolution
 
     if Path(basename).suffix == OUT_EXTENSION:
         return resolve_out_group(basename, candidates)
-    if is_text_file(basename):
+    if Path(basename).suffix in TEXT_EXTENSIONS:
         return resolve_text_group(basename, candidates)
-    return resolve_binary_group(basename, candidates)
-
-
-def candidate_sort_key(candidate: Candidate) -> tuple[bool, str]:
-    return (candidate.is_dest, str(candidate.path))
+    return conflict_resolution(basename, candidates)
 
 
 def preview_line(line: bytes | None) -> str:
@@ -467,25 +432,24 @@ def build_report(
     dry_run: bool,
     counts: Counter[str],
 ) -> str:
-    lines = [
+    sections = [
         "MERMAID server reconciliation report",
-        f"timestamp: {datetime.now().isoformat(timespec='seconds')}",
+        f"timestamp: {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"dry_run: {dry_run}",
         "",
         "source directories:",
+        *(f"  {source}" for source in sources),
+        "",
+        f"destination directory: {dest}",
+        "",
+        "ignore policy:",
+        *(f"  - {rule}" for rule in IGNORE_POLICY),
+        "",
+        "counts:",
+        format_counts(counts),
+        "",
     ]
-    lines.extend(f"  {source}" for source in sources)
-    lines.extend(
-        [
-            "",
-            f"destination directory: {dest}",
-            "",
-            "ignore policy:",
-        ]
-    )
-    lines.extend(f"  - {rule}" for rule in IGNORE_POLICY)
-    lines.extend(["", "counts:", format_counts(counts), ""])
-    return "\n".join(lines)
+    return "\n".join(sections)
 
 
 def run_git(source: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -503,28 +467,17 @@ def source_git_log(sources: list[Path]) -> str:
         lines = [str(source)]
         inside_work_tree = run_git(source, ["rev-parse", "--is-inside-work-tree"])
         if inside_work_tree.returncode != 0 or inside_work_tree.stdout.strip() != "true":
-            lines.extend(
-                [
-                    "Commit: <not a git repository>",
-                    "Status:",
-                    "<not a git repository>",
-                ]
-            )
+            lines.extend(["Commit: <not a git repository>", "Status:", "<not a git repository>"])
             sections.append("\n".join(lines))
             continue
 
         commit = run_git(source, ["rev-parse", "HEAD"])
-        if commit.returncode == 0:
-            lines.append(f"Commit: {commit.stdout.strip()}")
-        else:
-            lines.append(f"Commit: <git error: {commit.stderr.strip()}>")
+        commit_text = commit.stdout.strip() if commit.returncode == 0 else f"<git error: {commit.stderr.strip()}>"
+        lines.append(f"Commit: {commit_text}")
 
         status = run_git(source, ["status"])
-        lines.append("Status:")
-        if status.returncode == 0:
-            lines.append(status.stdout.rstrip())
-        else:
-            lines.append(f"<git error: {status.stderr.strip()}>")
+        status_text = status.stdout.rstrip() if status.returncode == 0 else f"<git error: {status.stderr.strip()}>"
+        lines.extend(["Status:", status_text])
 
         sections.append("\n".join(lines))
 
@@ -538,12 +491,7 @@ def build_review_report(conflicts: list[Conflict]) -> str:
     lines = ["MERMAID server reconciliation review", ""]
     for conflict in conflicts:
         diff = conflict.difference
-        lines.extend(
-            [
-                f"basename: {conflict.basename}",
-                "candidates:",
-            ]
-        )
+        lines.extend([f"basename: {conflict.basename}", "candidates:"])
         for candidate in sorted(conflict.candidates, key=candidate_sort_key):
             marker = " [destination]" if candidate.is_dest else " [source]"
             lines.append(f"  {candidate.path} ({candidate.size} bytes){marker}")
