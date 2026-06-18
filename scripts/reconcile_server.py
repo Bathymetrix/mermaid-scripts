@@ -19,6 +19,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+RECONCILE_SERVER_VERSION = "0.1.0"
 
 MERMAID_ROOT = Path(os.environ.get("MERMAID", "~/mermaid")).expanduser()
 DEFAULT_SOURCES = [
@@ -633,6 +634,7 @@ def build_report(
 ) -> str:
     lines = [
         "MERMAID server reconciliation report",
+        f"version: {RECONCILE_SERVER_VERSION}",
         f"timestamp: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"dry_run: {dry_run}",
         "",
