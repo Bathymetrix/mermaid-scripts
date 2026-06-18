@@ -16,7 +16,7 @@ import shutil
 import subprocess
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -510,6 +510,16 @@ def resolve_text_group(basename: str, candidates: list[Candidate]) -> Resolution
             previous_line_paths.add(record.path)
             output_records.append(record)
 
+    if not output_records:
+        return Resolution(
+            action="conflicts",
+            conflict=Conflict(
+                basename=basename,
+                candidates=candidates,
+                difference=find_conflict_pair(candidates),
+            ),
+        )
+
     if output_records and all(record.has_timestamp for record in output_records):
         output_records.sort(
             key=lambda record: (record.key, str(record.path), record.line_number)
@@ -623,7 +633,7 @@ def build_report(
 ) -> str:
     lines = [
         "MERMAID server reconciliation report",
-        f"timestamp: {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}",
+        f"timestamp: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"dry_run: {dry_run}",
         "",
         "source directories:",
@@ -737,7 +747,7 @@ def main() -> int:
     conflicts: list[Conflict] = []
 
     for basename in sorted(groups):
-        candidates = sorted(groups[basename], key=candidate_sort_key)
+        candidates = groups[basename]
         resolution = resolve_group(basename, candidates)
         counts[resolution.action] += 1
 

@@ -10,7 +10,7 @@ belong in a dedicated package such as `mermaid-records`,
 ## Requirements
 
 - Zsh
-- Python 3
+- Python 3.9+
 
 All scripts are intended to be run from the command line on macOS/Linux.
 
@@ -33,9 +33,9 @@ Features:
 Example:
 
 ```bash
-./reconcile_server.py --dry-run
+scripts/reconcile_server.py --dry-run
 
-./reconcile_server.py \
+scripts/reconcile_server.py \
     --src ~/mermaid/server \
     --src ~/mermaid/server_jamstec \
     --dest ~/mermaid/server_everyone

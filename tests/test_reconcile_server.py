@@ -1,10 +1,17 @@
+from __future__ import annotations
+
+import sys
+from collections import defaultdict
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from reconcile_server import (
     Candidate,
     DEFAULT_DEST,
     DEFAULT_SOURCES,
     is_candidate_file,
+    scan_tree,
     parse_out_blocks,
     resolve_group,
 )
@@ -274,6 +281,35 @@ def test_text_merge_preserves_blank_spacing_for_log_and_mer(tmp_path: Path) -> N
 
         assert resolution.action == "merged_deduplicated"
         assert resolution.merged_content == b"alpha\n\n\nbeta\n\n"
+
+
+def test_text_merge_conflicts_on_different_blank_only_files(tmp_path: Path) -> None:
+    source_a = make_candidate(tmp_path / "source_a" / "blank.LOG", b"\n")
+    source_b = make_candidate(tmp_path / "source_b" / "blank.LOG", b"\n\n")
+
+    resolution = resolve_group("blank.LOG", [source_a, source_b])
+
+    assert resolution.action == "conflicts"
+    assert resolution.conflict is not None
+    assert resolution.conflict.difference.left == source_a.path
+    assert resolution.conflict.difference.right == source_b.path
+
+
+def test_scan_order_is_preserved_for_resolution(tmp_path: Path) -> None:
+    groups = defaultdict(list)
+    seen = set()
+    first_root = tmp_path / "z_first_source"
+    second_root = tmp_path / "a_second_source"
+    make_candidate(first_root / "ordered.out", b"")
+    make_candidate(second_root / "ordered.out", b"")
+
+    scan_tree(first_root, is_dest=False, groups=groups, seen=seen)
+    scan_tree(second_root, is_dest=False, groups=groups, seen=seen)
+
+    assert [candidate.path.parent.name for candidate in groups["ordered.out"]] == [
+        "z_first_source",
+        "a_second_source",
+    ]
 
 
 def test_request_conflict_prefers_source_reference_over_destination_duplicate(
