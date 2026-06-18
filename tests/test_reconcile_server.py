@@ -1,75 +1,237 @@
-#!/usr/bin/env python3
-"""Behavior checks for reconcile_server.py."""
-
-from __future__ import annotations
-
-import tempfile
-import unittest
 from pathlib import Path
 
-import reconcile_server as r
+from reconcile_server import Candidate, parse_out_blocks, resolve_group
 
 
-class ReconcileServerTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
-
-    def tearDown(self) -> None:
-        self.tmp.cleanup()
-
-    def write(self, name: str, content: bytes, *, is_dest: bool = False) -> r.Candidate:
-        path = self.root / name
-        path.write_bytes(content)
-        return r.Candidate(path=path, size=path.stat().st_size, is_dest=is_dest)
-
-    def test_binary_identical_and_conflict(self) -> None:
-        a = self.write("a.BIN", b"abc\x00def")
-        b = self.write("b.BIN", b"abc\x00def")
-        dest = self.write("dest.BIN", b"abc\x00def", is_dest=True)
-        different = self.write("different.BIN", b"abc\x00XYZ")
-
-        self.assertEqual(r.resolve_group("thing.BIN", [a, b]).action, "copied_identical")
-        self.assertEqual(r.resolve_group("thing.BIN", [a, b, dest]).action, "already_current")
-        self.assertEqual(r.resolve_group("thing.BIN", [a, different]).action, "conflicts")
-
-    def test_out_blocks_merge_deduplicate_and_stay_idempotent(self) -> None:
-        block_2018 = b"***20180628-07h46mn41: sending cmd from a.cmd\nTx one\n\n"
-        block_2026 = b"***20260522-06h10mn00: sending cmd from a.cmd\nTx two\n\n"
-        a = self.write("a.out", block_2018)
-        b = self.write("b.out", block_2026)
-        superset = self.write("superset.out", block_2018 + block_2026)
-        dest = self.write("dest.out", block_2018 + block_2026, is_dest=True)
-
-        disjoint = r.resolve_group("thing.out", [a, b])
-        self.assertEqual(disjoint.action, "merged_out_blocks")
-        self.assertEqual(disjoint.merged_content, block_2018 + block_2026)
-
-        deduped = r.resolve_group("thing.out", [a, superset])
-        self.assertEqual(deduped.action, "merged_out_blocks")
-        self.assertEqual(deduped.merged_content, block_2018 + block_2026)
-
-        self.assertEqual(r.resolve_group("thing.out", [a, b, dest]).action, "already_current")
-
-    def test_out_preamble_conflicts(self) -> None:
-        good = self.write("good.out", b"***20180628-07h46mn41: sending cmd\nTx\n")
-        bad = self.write("bad.out", b"not assignable\n***20180628-07h46mn41: sending cmd\n")
-
-        result = r.resolve_group("thing.out", [bad, good])
-        self.assertEqual(result.action, "conflicts")
-        self.assertIsNotNone(result.conflict)
-
-    def test_vit_record_merge_and_request_conflict(self) -> None:
-        a = self.write("a.vit", b"alpha\n")
-        b = self.write("b.vit", b"beta\n")
-        merged = r.resolve_group("thing.vit", [a, b])
-        self.assertEqual(merged.action, "merged_disjoint")
-        self.assertEqual(merged.merged_content, b"alpha\nbeta\n")
-
-        req_a = self.write("req_a.vit", b"mermaid REQUEST:2024-01-01T00_00_00,1200,5\n")
-        req_b = self.write("req_b.vit", b"mermaid REQUEST:2024-01-01T00_00_00,1800,5\n")
-        self.assertEqual(r.resolve_group("thing.vit", [req_a, req_b]).action, "conflicts")
+def make_candidate(path: Path, content: bytes, *, is_dest: bool = False) -> Candidate:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return Candidate(path=path, size=path.stat().st_size, is_dest=is_dest)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_parse_out_blocks_keeps_internal_star_lines_in_one_block(tmp_path: Path) -> None:
+    candidate = make_candidate(
+        tmp_path / "X.out",
+        b"\n"
+        b"***20221207-05h50mn19: sending cmd from X.cmd\n"
+        b"Tx: ...\n"
+        b"*** file X.cmd content sent\n"
+        b"*** Clear request commands ***\n"
+        b"*** try 1/3 failed for file X.cmd\n"
+        b"*** too many errors, skipping file X.cmd\n",
+    )
+
+    parsed = parse_out_blocks(candidate)
+
+    assert parsed.conflict is None
+    assert parsed.blocks == [
+        b"***20221207-05h50mn19: sending cmd from X.cmd\n"
+        b"Tx: ...\n"
+        b"*** file X.cmd content sent\n"
+        b"*** Clear request commands ***\n"
+        b"*** try 1/3 failed for file X.cmd\n"
+        b"*** too many errors, skipping file X.cmd\n"
+    ]
+
+
+def test_out_merge_retains_identical_footer_lines_in_distinct_sessions(
+    tmp_path: Path,
+) -> None:
+    block_a = (
+        b"***20221207-05h50mn19: sending cmd from X.cmd\n"
+        b"Tx: one\n"
+        b"*** Clear request commands ***\n"
+        b"\n"
+    )
+    block_b = (
+        b"***20221207-05h51mn19: sending cmd from Y.cmd\n"
+        b"Tx: two\n"
+        b"*** Clear request commands ***\n"
+        b"\n"
+    )
+    source_a = make_candidate(tmp_path / "source_a" / "same.out", block_a)
+    source_b = make_candidate(tmp_path / "source_b" / "same.out", block_b)
+
+    resolution = resolve_group("same.out", [source_a, source_b])
+
+    assert resolution.action == "merged_disjoint"
+    assert resolution.merged_content == block_a + block_b
+    assert resolution.merged_content.count(b"*** Clear request commands ***\n") == 2
+
+
+def test_out_merge_appends_and_dedupes_by_session_block(tmp_path: Path) -> None:
+    block_a = (
+        b"***20221207-05h50mn19: sending cmd from A.cmd\n"
+        b"Tx: A\n"
+        b"*** Clear request commands ***\n"
+        b"\n"
+    )
+    block_b = (
+        b"***20221207-05h51mn19: sending cmd from B.cmd\n"
+        b"Tx: B\n"
+        b"*** Clear request commands ***\n"
+        b"\n"
+    )
+    source_a = make_candidate(tmp_path / "source_a" / "merge.out", block_a)
+    source_b = make_candidate(tmp_path / "source_b" / "merge.out", block_b + block_a)
+
+    resolution = resolve_group("merge.out", [source_a, source_b])
+
+    assert resolution.action == "merged_deduplicated"
+    assert resolution.merged_content == block_a + block_b
+
+
+def test_out_merge_with_existing_destination_is_already_current(tmp_path: Path) -> None:
+    block_a = (
+        b"***20221207-05h50mn19: sending cmd from A.cmd\n"
+        b"Tx: A\n"
+        b"*** Clear request commands ***\n"
+        b"\n"
+    )
+    block_b = (
+        b"***20221207-05h51mn19: sending cmd from B.cmd\n"
+        b"Tx: B\n"
+        b"*** try 1/3 failed for file B.cmd\n"
+        b"\n"
+    )
+    source_a = make_candidate(tmp_path / "source_a" / "rerun.out", block_a)
+    source_b = make_candidate(tmp_path / "source_b" / "rerun.out", block_b)
+    dest = make_candidate(
+        tmp_path / "dest" / "rerun.out", block_a + block_b, is_dest=True
+    )
+
+    resolution = resolve_group("rerun.out", [source_a, source_b, dest])
+
+    assert resolution.action == "already_current"
+    assert resolution.merged_content is None
+
+
+def test_out_same_session_start_with_different_body_conflicts(tmp_path: Path) -> None:
+    source_a = make_candidate(
+        tmp_path / "source_a" / "452.020-P-06.out",
+        b"***20221207-05h50mn19: sending cmd from 452.020-P-06.cmd\n"
+        b'Rx: "exit"\n'
+        b"Rx: no answer, exiting\n"
+        b"### cmd timeout\n",
+    )
+    source_b = make_candidate(
+        tmp_path / "source_b" / "452.020-P-06.out",
+        b"***20221207-05h50mn19: sending cmd from 452.020-P-06.cmd\n"
+        b'Rx: "exit"\n'
+        b"Rx: no nswer, exiting\n"
+        b"### cmd timeout\n",
+    )
+
+    resolution = resolve_group("452.020-P-06.out", [source_a, source_b])
+
+    assert resolution.action == "conflicts"
+    assert resolution.conflict is not None
+    assert resolution.conflict.difference.left_line == b"Rx: no answer, exiting\n"
+    assert resolution.conflict.difference.right_line == b"Rx: no nswer, exiting\n"
+
+
+def test_out_conflict_prefers_source_reference_over_destination_duplicate(
+    tmp_path: Path,
+) -> None:
+    clean_block = (
+        b"***20221207-05h50mn19: sending cmd from 452.020-P-06.cmd\n"
+        b'Rx: "exit"\n'
+        b"Rx: no answer, exiting\n"
+        b"### cmd timeout\n"
+    )
+    edited_block = clean_block.replace(b"no answer", b"no nswer")
+    source = make_candidate(
+        tmp_path / "source" / "452.020-P-06.out",
+        clean_block,
+    )
+    dest = make_candidate(
+        tmp_path / "dest" / "452.020-P-06.out",
+        clean_block + edited_block,
+        is_dest=True,
+    )
+
+    resolution = resolve_group("452.020-P-06.out", [source, dest])
+
+    assert resolution.action == "conflicts"
+    assert resolution.conflict is not None
+    assert resolution.conflict.difference.left == source.path
+    assert resolution.conflict.difference.right == dest.path
+    assert resolution.conflict.difference.left_line == b"Rx: no answer, exiting\n"
+    assert resolution.conflict.difference.right_line == b"Rx: no nswer, exiting\n"
+
+
+def test_vit_merge_preserves_blank_spacing_between_appended_blocks(
+    tmp_path: Path,
+) -> None:
+    block_a = b"SESSION A\npayload A\n\n\n"
+    block_b = b"SESSION B\npayload B\n\n\n"
+    source_a = make_candidate(tmp_path / "source_a" / "merge.vit", block_a)
+    source_b = make_candidate(tmp_path / "source_b" / "merge.vit", block_a + block_b)
+
+    resolution = resolve_group("merge.vit", [source_a, source_b])
+
+    assert resolution.action == "merged_deduplicated"
+    assert resolution.merged_content == block_a + block_b
+
+
+def test_text_merge_preserves_blank_spacing_for_log_and_mer(tmp_path: Path) -> None:
+    for basename in ("merge.LOG", "merge.MER"):
+        source_a = make_candidate(
+            tmp_path / basename / "source_a" / basename,
+            b"alpha\n\n\n",
+        )
+        source_b = make_candidate(
+            tmp_path / basename / "source_b" / basename,
+            b"alpha\n\n\nbeta\n\n",
+        )
+
+        resolution = resolve_group(basename, [source_a, source_b])
+
+        assert resolution.action == "merged_deduplicated"
+        assert resolution.merged_content == b"alpha\n\n\nbeta\n\n"
+
+
+def test_request_conflict_prefers_source_reference_over_destination_duplicate(
+    tmp_path: Path,
+) -> None:
+    clean_line = b"mermaid REQUEST: 2022-01-01T00:00:00 clean\n"
+    edited_line = b"mermaid REQUEST: 2022-01-01T00:00:00 edited\n"
+    dest = make_candidate(
+        tmp_path / "dest" / "requests.LOG",
+        clean_line + edited_line,
+        is_dest=True,
+    )
+    source = make_candidate(tmp_path / "source" / "requests.LOG", clean_line)
+
+    resolution = resolve_group("requests.LOG", [dest, source])
+
+    assert resolution.action == "conflicts"
+    assert resolution.conflict is not None
+    assert resolution.conflict.difference.left == source.path
+    assert resolution.conflict.difference.right == dest.path
+    assert resolution.conflict.difference.left_line == clean_line
+    assert resolution.conflict.difference.right_line == edited_line
+
+
+def test_binary_conflict_prefers_source_reference_over_destination_duplicate(
+    tmp_path: Path,
+) -> None:
+    dest = make_candidate(
+        tmp_path / "dest" / "sample.BIN",
+        b"clean\n",
+        is_dest=True,
+    )
+    source = make_candidate(tmp_path / "source" / "sample.BIN", b"clean\n")
+    edited_source = make_candidate(
+        tmp_path / "edited_source" / "sample.BIN",
+        b"clxan\n",
+    )
+
+    resolution = resolve_group("sample.BIN", [dest, source, edited_source])
+
+    assert resolution.action == "conflicts"
+    assert resolution.conflict is not None
+    assert resolution.conflict.difference.left == source.path
+    assert resolution.conflict.difference.right == edited_source.path
+    assert resolution.conflict.difference.left_line == b"clean\n"
+    assert resolution.conflict.difference.right_line == b"clxan\n"
