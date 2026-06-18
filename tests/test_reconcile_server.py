@@ -1,12 +1,97 @@
 from pathlib import Path
 
-from reconcile_server import Candidate, parse_out_blocks, resolve_group
+from reconcile_server import (
+    Candidate,
+    DEFAULT_DEST,
+    DEFAULT_SOURCES,
+    is_candidate_file,
+    parse_out_blocks,
+    resolve_group,
+)
+
+
+REAL_SERVER_ROOTS = [*DEFAULT_SOURCES, DEFAULT_DEST]
+BINARY_STYLE_EXTENSION_CASES = {
+    ".BIN": ".BIN",
+    # No .S41 examples exist in the default roots; .S61 supplies real binary bytes.
+    ".S41": ".S61",
+    ".S61": ".S61",
+    ".000": ".000",
+}
+TEXT_EXTENSION_CASES = (".LOG", ".MER", ".vit")
 
 
 def make_candidate(path: Path, content: bytes, *, is_dest: bool = False) -> Candidate:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     return Candidate(path=path, size=path.stat().st_size, is_dest=is_dest)
+
+
+def real_example_path(suffix: str) -> Path:
+    for root in REAL_SERVER_ROOTS:
+        if not root.exists():
+            continue
+        for path in root.rglob(f"*{suffix}"):
+            if (
+                path.is_file()
+                and ".git" not in path.parts
+                and "__pycache__" not in path.parts
+                and is_candidate_file(path)
+            ):
+                return path
+    raise AssertionError(f"No real MERMAID server example found for {suffix}")
+
+
+def real_example_bytes(suffix: str, *, limit: int | None = None) -> bytes:
+    content = real_example_path(suffix).read_bytes()
+    if limit is not None:
+        content = content[:limit]
+    assert content
+    return content
+
+
+def mutate_bytes(content: bytes) -> bytes:
+    assert content
+    index = min(len(content) - 1, 8)
+    replacement = (content[index] + 1) % 256
+    return content[:index] + bytes([replacement]) + content[index + 1 :]
+
+
+def normalized_text_example(suffix: str) -> bytes:
+    content = real_example_bytes(suffix, limit=4096).replace(b"\r\n", b"\n")
+    lines = [
+        line
+        for line in content.splitlines(keepends=True)
+        if line.strip() and b"mermaid REQUEST:" not in line
+    ]
+    assert lines
+    return b"".join(lines[:8]).rstrip(b"\n") + b"\n\n"
+
+
+def real_out_block() -> bytes:
+    for root in REAL_SERVER_ROOTS:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.out"):
+            if not path.is_file() or not is_candidate_file(path):
+                continue
+            candidate = Candidate(path=path, size=path.stat().st_size)
+            parsed = parse_out_blocks(candidate)
+            if parsed.conflict is None:
+                for block in parsed.blocks:
+                    if len(block.splitlines(keepends=True)) > 1:
+                        return block
+    raise AssertionError("No parseable real .out session block found")
+
+
+def mutate_out_block_body(block: bytes) -> bytes:
+    lines = block.splitlines(keepends=True)
+    assert lines
+    for index in range(1, len(lines)):
+        if lines[index].strip():
+            lines[index] = mutate_bytes(lines[index])
+            return b"".join(lines)
+    return block + b"modified body line\n"
 
 
 def test_parse_out_blocks_keeps_internal_star_lines_in_one_block(tmp_path: Path) -> None:
@@ -235,3 +320,80 @@ def test_binary_conflict_prefers_source_reference_over_destination_duplicate(
     assert resolution.conflict.difference.right == edited_source.path
     assert resolution.conflict.difference.left_line == b"clean\n"
     assert resolution.conflict.difference.right_line == b"clxan\n"
+
+
+def test_real_binary_style_examples_conflict_for_each_allowed_extension(
+    tmp_path: Path,
+) -> None:
+    for suffix, real_suffix in BINARY_STYLE_EXTENSION_CASES.items():
+        content = real_example_bytes(real_suffix, limit=4096)
+        edited_content = mutate_bytes(content)
+        basename = f"real_binary{suffix}"
+        source = make_candidate(tmp_path / suffix / "source" / basename, content)
+        dest = make_candidate(
+            tmp_path / suffix / "dest" / basename,
+            content,
+            is_dest=True,
+        )
+        edited_source = make_candidate(
+            tmp_path / suffix / "edited_source" / basename,
+            edited_content,
+        )
+
+        assert is_candidate_file(source.path)
+        resolution = resolve_group(basename, [dest, source, edited_source])
+
+        assert resolution.action == "conflicts", suffix
+        assert resolution.conflict is not None
+        assert resolution.conflict.difference.left == source.path
+        assert resolution.conflict.difference.right == edited_source.path
+        assert resolution.conflict.difference.left_line != (
+            resolution.conflict.difference.right_line
+        )
+
+
+def test_real_text_examples_preserve_spacing_for_each_text_extension(
+    tmp_path: Path,
+) -> None:
+    for suffix in TEXT_EXTENSION_CASES:
+        base_content = normalized_text_example(suffix)
+        appended_record = f"codex test append for {suffix}\n\n".encode("ascii")
+        basename = f"real_text{suffix}"
+        source = make_candidate(tmp_path / suffix / "source" / basename, base_content)
+        dest = make_candidate(
+            tmp_path / suffix / "dest" / basename,
+            base_content,
+            is_dest=True,
+        )
+        appended_source = make_candidate(
+            tmp_path / suffix / "appended_source" / basename,
+            base_content + appended_record,
+        )
+
+        assert is_candidate_file(source.path)
+        resolution = resolve_group(basename, [dest, source, appended_source])
+
+        assert resolution.action == "merged_deduplicated", suffix
+        assert resolution.merged_content == base_content + appended_record
+        assert b"\n\n" in resolution.merged_content
+
+
+def test_real_out_example_conflicts_on_same_session_start_body_edit(
+    tmp_path: Path,
+) -> None:
+    block = real_out_block()
+    edited_block = mutate_out_block_body(block)
+    source = make_candidate(tmp_path / "source" / "real.out", block)
+    dest = make_candidate(
+        tmp_path / "dest" / "real.out",
+        block + edited_block,
+        is_dest=True,
+    )
+
+    assert is_candidate_file(source.path)
+    resolution = resolve_group("real.out", [source, dest])
+
+    assert resolution.action == "conflicts"
+    assert resolution.conflict is not None
+    assert resolution.conflict.difference.left == source.path
+    assert resolution.conflict.difference.right == dest.path
