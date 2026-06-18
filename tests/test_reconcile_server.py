@@ -14,6 +14,7 @@ from reconcile_server import (
     scan_tree,
     parse_out_blocks,
     resolve_group,
+    source_git_log,
 )
 
 
@@ -310,6 +311,15 @@ def test_scan_order_is_preserved_for_resolution(tmp_path: Path) -> None:
         "z_first_source",
         "a_second_source",
     ]
+
+
+def test_source_git_log_reports_plain_directory_as_not_git_repo(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "plain_source"
+    source.mkdir()
+
+    assert source_git_log([source]) == "plain_source\nNot a Git repository\n"
 
 
 def test_request_conflict_prefers_source_reference_over_destination_duplicate(

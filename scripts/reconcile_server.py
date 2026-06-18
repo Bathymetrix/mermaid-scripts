@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-RECONCILE_SERVER_VERSION = "0.1.0"
+RECONCILE_SERVER_VERSION = "0.1.1"
 
 MERMAID_ROOT = Path(os.environ.get("MERMAID", "~/mermaid")).expanduser()
 DEFAULT_SOURCES = [
@@ -663,19 +663,16 @@ def run_git(source: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def has_git_metadata(source: Path) -> bool:
+    return (source / ".git").exists()
+
+
 def source_git_log(sources: list[Path]) -> str:
     sections = []
     for source in sources:
         lines = [str(source)]
-        inside_work_tree = run_git(source, ["rev-parse", "--is-inside-work-tree"])
-        if inside_work_tree.returncode != 0 or inside_work_tree.stdout.strip() != "true":
-            lines.extend(
-                [
-                    "Commit: <not a git repository>",
-                    "Status:",
-                    "<not a git repository>",
-                ]
-            )
+        if not has_git_metadata(source):
+            lines = [source.name, "Not a Git repository"]
             sections.append("\n".join(lines))
             continue
 
