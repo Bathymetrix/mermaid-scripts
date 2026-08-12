@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+from typing import Callable
 
 UNTIMED_MARKER = "UNTIMED"
 _RAW_TIMESTAMP = re.compile(r"^(?P<time>.+?):")
@@ -90,17 +91,26 @@ def discover_family_files(records_dir: Path) -> dict[str, list[Path]]:
     return families
 
 
-def render_records(records_dir: Path, output_dir: Path) -> dict[str, int]:
+def render_records(
+    records_dir: Path,
+    output_dir: Path,
+    *,
+    progress: Callable[[str], None] | None = None,
+) -> dict[str, int]:
     if not records_dir.is_dir():
         raise ValueError(f"Records directory does not exist or is not a directory: {records_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
     counts: dict[str, int] = {}
     for family, paths in discover_family_files(records_dir).items():
+        if progress is not None:
+            progress(f"Rendering {family} from {len(paths)} JSONL file(s)...")
         lines = [line for path in paths for line in iter_rendered_lines(path)]
         lines.sort(key=RenderedLine.sort_key)
         content = "\n".join(line.render() for line in lines)
         atomic_write(output_dir / f"{family}.txt", content + ("\n" if lines else ""))
         counts[family] = len(lines)
+        if progress is not None:
+            progress(f"Wrote {family}.txt ({len(lines)} rendered line(s)).")
     return counts
 
 
@@ -225,11 +235,16 @@ def atomic_write(path: Path, content: str) -> None:
 
 def main() -> int:
     args = parse_args()
+    input_dir = resolve_input_dir(args.input_dir)
+    output_dir = resolve_output_dir(args.output_dir)
+    print(f"Reading normalized JSONL from {input_dir}", flush=True)
+    print(f"Rebuilding record views in {output_dir}", flush=True)
     counts = render_records(
-        resolve_input_dir(args.input_dir), resolve_output_dir(args.output_dir)
+        input_dir,
+        output_dir,
+        progress=lambda message: print(message, flush=True),
     )
-    for family, count in sorted(counts.items()):
-        print(f"{family}: {count} lines")
+    print(f"Completed {len(counts)} record family view(s).", flush=True)
     return 0
 
 

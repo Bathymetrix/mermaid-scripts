@@ -83,3 +83,25 @@ def test_empty_family_and_rebuild_do_not_retain_stale_text(tmp_path: Path) -> No
     path.write_text("", encoding="utf-8")
     render_records(records, views)
     assert (views / f"{family}.txt").read_text() == ""
+
+
+def test_render_records_reports_family_progress(tmp_path: Path) -> None:
+    records, views = tmp_path / "records", tmp_path / "views"
+    write_rows(
+        records / "serial-a" / "log_gps_records.serial-a.jsonl",
+        [
+            {
+                "instrument_id": "A",
+                "record_time": "2023-11-14T22:13:20.000000Z",
+                "raw_line": "GPS",
+            }
+        ],
+    )
+    messages: list[str] = []
+
+    render_records(records, views, progress=messages.append)
+
+    assert messages == [
+        "Rendering log_gps_records from 1 JSONL file(s)...",
+        "Wrote log_gps_records.txt (1 rendered line(s)).",
+    ]
