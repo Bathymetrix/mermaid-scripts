@@ -18,7 +18,7 @@ from reconcile_server import (
 )
 
 
-REAL_SERVER_ROOTS = [*DEFAULT_SOURCES, DEFAULT_DEST]
+REAL_SERVER_ROOTS = [*DEFAULT_SOURCES, *([DEFAULT_DEST] if DEFAULT_DEST else [])]
 BINARY_STYLE_EXTENSION_CASES = {
     ".BIN": ".BIN",
     # No .S41 examples exist in the default roots; .S61 supplies real binary bytes.

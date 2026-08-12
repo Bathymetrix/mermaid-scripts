@@ -36,10 +36,27 @@ Example:
 scripts/reconcile_server.py --dry-run
 
 scripts/reconcile_server.py \
-    --src ~/mermaid/server \
-    --src ~/mermaid/server_jamstec \
-    --dest ~/mermaid/server_everyone
+    --src "$MERMAID/server" \
+    --src "$MERMAID/server_jamstec" \
+    --dest "$MERMAID/server_everyone"
 ```
+
+### render_record_views.py
+
+Build disposable, grep-friendly, chronologically sorted text views from the
+canonical `mermaid-records` JSONL corpus. The destination is always explicit;
+the script never modifies `$MERMAID/records`.
+
+```bash
+scripts/render_record_views.py
+```
+
+The script defaults to `$MERMAID/records` and `$MERMAID/record-views`; use
+`--input-dir` / `-i` and `--output-dir` / `-o` to override either location. It
+fully rebuilds each discovered family file atomically. Timestamped source lines
+render as `<ISO-record-time> <instrument_id>: <raw-line>`; preserved source
+lines without an individual normalized time render as `UNTIMED` rather than
+being assigned an invented timestamp.
 
 ## Philosophy
 

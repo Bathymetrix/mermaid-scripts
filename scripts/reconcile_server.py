@@ -21,15 +21,19 @@ from pathlib import Path
 
 RECONCILE_SERVER_VERSION = "0.1.1"
 
-MERMAID_ROOT = Path(os.environ.get("MERMAID", "~/mermaid")).expanduser()
-DEFAULT_SOURCES = [
-    MERMAID_ROOT / "server",
-    MERMAID_ROOT / "server_jamstec",
-    MERMAID_ROOT / "server_sustech",
-    MERMAID_ROOT / "server_stanford",
-    MERMAID_ROOT / "servers",
-]
-DEFAULT_DEST = MERMAID_ROOT / "server_everyone"
+MERMAID_ROOT = Path(os.environ["MERMAID"]).expanduser() if "MERMAID" in os.environ else None
+DEFAULT_SOURCES = (
+    [
+        MERMAID_ROOT / "server",
+        MERMAID_ROOT / "server_jamstec",
+        MERMAID_ROOT / "server_sustech",
+        MERMAID_ROOT / "server_stanford",
+        MERMAID_ROOT / "servers",
+    ]
+    if MERMAID_ROOT is not None
+    else []
+)
+DEFAULT_DEST = MERMAID_ROOT / "server_everyone" if MERMAID_ROOT is not None else None
 
 ALL_EXTENSIONS = {
     ".BIN",
@@ -130,8 +134,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dest",
         type=Path,
-        default=Path(DEFAULT_DEST),
-        help=f"Flat destination directory. Default: {DEFAULT_DEST}",
+        default=DEFAULT_DEST,
+        help="Flat destination directory. Defaults to $MERMAID/server_everyone.",
     )
     parser.add_argument(
         "--dry-run",
@@ -725,7 +729,11 @@ def build_review_report(conflicts: list[Conflict]) -> str:
 
 def main() -> int:
     args = parse_args()
-    sources = [expand_path(path) for path in (args.src or map(Path, DEFAULT_SOURCES))]
+    if args.src is None and not DEFAULT_SOURCES:
+        raise SystemExit("MERMAID is not set. Provide --src or set MERMAID.")
+    if args.dest is None:
+        raise SystemExit("MERMAID is not set. Provide --dest or set MERMAID.")
+    sources = [expand_path(path) for path in (args.src or DEFAULT_SOURCES)]
     dest = expand_path(args.dest)
 
     if not args.dry_run:
