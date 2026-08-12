@@ -59,6 +59,11 @@ testmode episodes retain their preserved source lines. Lines without an
 individual normalized time render as `UNTIMED` rather than being assigned an
 invented timestamp.
 
+Combined family views remain at the output root and include the instrument ID.
+The renderer also mirrors each instrument directory below the output root,
+with one family file per input family; those float-specific lines omit the
+redundant instrument ID.
+
 ## Philosophy
 
 These scripts prioritize:

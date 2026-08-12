@@ -44,6 +44,8 @@ def test_merges_sorts_and_uses_single_line_messages(tmp_path: Path) -> None:
     write_rows(records / "serial-b" / f"{family}.serial-b.jsonl", [{"instrument_id": "B", "record_time": "2023-11-14T22:13:22.000000Z", "message": "battery B", "raw_line": "literal B"}])
     assert render_records(records, views) == {family: 2}
     assert (views / f"{family}.txt").read_text() == "2023-11-14T22:13:22.000000Z B: battery B\n2023-11-14T22:13:23.000000Z A: battery A\n"
+    assert (views / "serial-a" / f"{family}.txt").read_text() == "2023-11-14T22:13:23.000000Z battery A\n"
+    assert (views / "serial-b" / f"{family}.txt").read_text() == "2023-11-14T22:13:22.000000Z battery B\n"
 
 
 def test_expands_grouped_lines_sorts_equal_times_deterministically(tmp_path: Path) -> None:
@@ -97,6 +99,7 @@ def test_empty_family_and_rebuild_do_not_retain_stale_text(tmp_path: Path) -> No
     path.write_text("", encoding="utf-8")
     render_records(records, views)
     assert (views / f"{family}.txt").read_text() == ""
+    assert (views / "serial-a" / f"{family}.txt").read_text() == ""
 
 
 def test_render_records_reports_family_progress(tmp_path: Path) -> None:

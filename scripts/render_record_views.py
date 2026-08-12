@@ -36,8 +36,11 @@ class RenderedLine:
             self.raw_line_index,
         )
 
-    def render(self) -> str:
-        return f"{self.time or UNTIMED_MARKER} {self.instrument_id}: {self.raw_line}"
+    def render(self, *, include_instrument_id: bool) -> str:
+        prefix = f"{self.time or UNTIMED_MARKER}"
+        if include_instrument_id:
+            return f"{prefix} {self.instrument_id}: {self.raw_line}"
+        return f"{prefix} {self.raw_line}"
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,14 +107,33 @@ def render_records(
     for family, paths in discover_family_files(records_dir).items():
         if progress is not None:
             progress(f"Rendering {family} from {len(paths)} JSONL file(s)...")
-        lines = [line for path in paths for line in iter_rendered_lines(path)]
+        lines: list[RenderedLine] = []
+        for path in paths:
+            instrument_lines = iter_rendered_lines(path)
+            instrument_lines.sort(key=RenderedLine.sort_key)
+            atomic_write(
+                output_dir / path.parent.name / f"{family}.txt",
+                render_lines(instrument_lines, include_instrument_id=False),
+            )
+            lines.extend(instrument_lines)
         lines.sort(key=RenderedLine.sort_key)
-        content = "\n".join(line.render() for line in lines)
-        atomic_write(output_dir / f"{family}.txt", content + ("\n" if lines else ""))
+        atomic_write(
+            output_dir / f"{family}.txt",
+            render_lines(lines, include_instrument_id=True),
+        )
         counts[family] = len(lines)
         if progress is not None:
             progress(f"Wrote {family}.txt ({len(lines)} rendered line(s)).")
     return counts
+
+
+def render_lines(
+    lines: list[RenderedLine], *, include_instrument_id: bool
+) -> str:
+    content = "\n".join(
+        line.render(include_instrument_id=include_instrument_id) for line in lines
+    )
+    return content + ("\n" if lines else "")
 
 
 def iter_rendered_lines(path: Path) -> list[RenderedLine]:
@@ -274,6 +296,7 @@ def time_from_raw_line(raw_line: str) -> str | None:
 
 
 def atomic_write(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
         temporary_path = Path(handle.name)
         handle.write(content)
