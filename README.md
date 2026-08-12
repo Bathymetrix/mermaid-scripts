@@ -53,10 +53,11 @@ scripts/render_record_views.py
 
 The script defaults to `$MERMAID/records` and `$MERMAID/record-views`; use
 `--input-dir` / `-i` and `--output-dir` / `-o` to override either location. It
-fully rebuilds each discovered family file atomically. Timestamped source lines
-render as `<ISO-record-time> <instrument_id>: <raw-line>`; preserved source
-lines without an individual normalized time render as `UNTIMED` rather than
-being assigned an invented timestamp.
+fully rebuilds each discovered family file atomically. Ordinary LOG and
+Iridium event rows render their upstream parsed `message`; parameter, CTD, and
+testmode episodes retain their preserved source lines. Lines without an
+individual normalized time render as `UNTIMED` rather than being assigned an
+invented timestamp.
 
 ## Philosophy
 

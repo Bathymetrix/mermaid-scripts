@@ -125,30 +125,28 @@ def iter_rendered_lines(path: Path) -> list[RenderedLine]:
                 raise ValueError(f"{path}:{record_index + 1} is not a JSON object")
             instrument_id = required_string(row, "instrument_id", path, record_index)
             if isinstance(row.get("raw_line"), str):
+                line_text = row.get("message", row["raw_line"])
+                if not isinstance(line_text, str):
+                    raise ValueError(f"{path}:{record_index + 1} message is not a string")
                 rendered.append(
                     make_line(
                         row.get("record_time"),
                         instrument_id,
-                        row["raw_line"],
+                        line_text,
                         path,
                         record_index,
                         0,
                     )
                 )
             elif isinstance(row.get("raw_lines"), list):
-                for raw_line_index, raw_line in enumerate(row["raw_lines"]):
-                    if not isinstance(raw_line, str):
-                        raise ValueError(f"{path}:{record_index + 1} raw_lines contains a non-string")
-                    rendered.append(
-                        make_line(
-                            time_from_raw_line(raw_line),
-                            instrument_id,
-                            raw_line,
-                            path,
-                            record_index,
-                            raw_line_index,
-                        )
+                rendered.extend(
+                    grouped_rendered_lines(
+                        row,
+                        instrument_id=instrument_id,
+                        path=path,
+                        record_index=record_index,
                     )
+                )
             elif isinstance(row.get("line"), str):
                 rendered.append(
                     make_line(
@@ -184,6 +182,55 @@ def iter_rendered_lines(path: Path) -> list[RenderedLine]:
             else:
                 raise ValueError(f"{path}:{record_index + 1} has no preserved raw text representation")
     return rendered
+
+
+def grouped_rendered_lines(
+    row: dict[str, object],
+    *,
+    instrument_id: str,
+    path: Path,
+    record_index: int,
+) -> list[RenderedLine]:
+    """Render grouped source lines, using Iridium's nested parsed messages."""
+    raw_lines = row["raw_lines"]
+    if not isinstance(raw_lines, list):
+        raise AssertionError("raw_lines was checked by iter_rendered_lines")
+    source_line_numbers = row.get("source_line_numbers")
+    iridium_events = row.get("iridium_events")
+    events_by_line_number: dict[int, dict[str, object]] = {}
+    if isinstance(source_line_numbers, list) and isinstance(iridium_events, list):
+        for event in iridium_events:
+            if not isinstance(event, dict):
+                raise ValueError(f"{path}:{record_index + 1} iridium_events contains a non-object")
+            line_number = event.get("source_line_number")
+            message = event.get("message")
+            if isinstance(line_number, int) and isinstance(message, str):
+                events_by_line_number[line_number] = event
+
+    lines: list[RenderedLine] = []
+    for raw_line_index, raw_line in enumerate(raw_lines):
+        if not isinstance(raw_line, str):
+            raise ValueError(f"{path}:{record_index + 1} raw_lines contains a non-string")
+        source_line_number = (
+            source_line_numbers[raw_line_index]
+            if isinstance(source_line_numbers, list)
+            and raw_line_index < len(source_line_numbers)
+            else None
+        )
+        event = events_by_line_number.get(source_line_number)
+        time = event.get("record_time") if event is not None else time_from_raw_line(raw_line)
+        line_text = event["message"] if event is not None else raw_line
+        lines.append(
+            make_line(
+                time,
+                instrument_id,
+                line_text,
+                path,
+                record_index,
+                raw_line_index,
+            )
+        )
+    return lines
 
 
 def required_string(row: dict[str, object], field: str, path: Path, record_index: int) -> str:

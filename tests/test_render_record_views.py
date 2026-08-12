@@ -38,12 +38,12 @@ def write_rows(path: Path, rows: list[dict[str, object]]) -> None:
     path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
 
-def test_merges_sorts_and_preserves_single_line_records(tmp_path: Path) -> None:
+def test_merges_sorts_and_uses_single_line_messages(tmp_path: Path) -> None:
     records, views, family = tmp_path / "records", tmp_path / "views", "log_battery_records"
-    write_rows(records / "serial-a" / f"{family}.serial-a.jsonl", [{"instrument_id": "A", "record_time": "2023-11-14T22:13:23.000000Z", "raw_line": "1700000003: battery A"}])
-    write_rows(records / "serial-b" / f"{family}.serial-b.jsonl", [{"instrument_id": "B", "record_time": "2023-11-14T22:13:22.000000Z", "raw_line": "literal  B  "}])
+    write_rows(records / "serial-a" / f"{family}.serial-a.jsonl", [{"instrument_id": "A", "record_time": "2023-11-14T22:13:23.000000Z", "message": "battery A", "raw_line": "1700000003: battery A"}])
+    write_rows(records / "serial-b" / f"{family}.serial-b.jsonl", [{"instrument_id": "B", "record_time": "2023-11-14T22:13:22.000000Z", "message": "battery B", "raw_line": "literal B"}])
     assert render_records(records, views) == {family: 2}
-    assert (views / f"{family}.txt").read_text() == "2023-11-14T22:13:22.000000Z B: literal  B  \n2023-11-14T22:13:23.000000Z A: 1700000003: battery A\n"
+    assert (views / f"{family}.txt").read_text() == "2023-11-14T22:13:22.000000Z B: battery B\n2023-11-14T22:13:23.000000Z A: battery A\n"
 
 
 def test_expands_grouped_lines_sorts_equal_times_deterministically(tmp_path: Path) -> None:
@@ -73,6 +73,20 @@ def test_keeps_untimed_grouped_and_mer_source_lines_visible(tmp_path: Path) -> N
     render_records(records, views)
     assert (views / "log_testmode_records.txt").read_text() == "2023-11-14T22:13:20.000000Z A: 1700000000: start\nUNTIMED A: Command list\n"
     assert (views / "mer_parameter_records.txt").read_text() == "UNTIMED A: <ADC GAIN=2 />\n"
+
+
+def test_uses_nested_iridium_messages_and_keeps_non_event_source_lines(tmp_path: Path) -> None:
+    records, views = tmp_path / "records", tmp_path / "views"
+    write_rows(records / "serial-a" / "log_iridium_records.serial-a.jsonl", [{
+        "instrument_id": "A",
+        "source_line_numbers": [1, 2],
+        "raw_lines": ["1700000000:[SURF,260]Iridium...", "session footer"],
+        "iridium_events": [{"source_line_number": 1, "record_time": "2023-11-14T22:13:20.000000Z", "message": "Iridium..."}],
+    }])
+
+    render_records(records, views)
+
+    assert (views / "log_iridium_records.txt").read_text() == "2023-11-14T22:13:20.000000Z A: Iridium...\nUNTIMED A: session footer\n"
 
 
 def test_empty_family_and_rebuild_do_not_retain_stale_text(tmp_path: Path) -> None:
