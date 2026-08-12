@@ -129,7 +129,12 @@ def parse_args() -> argparse.Namespace:
         "--src",
         action="append",
         type=Path,
-        help="Source directory. May be supplied multiple times.",
+        help=(
+            "Source directory. May be supplied multiple times. Defaults to "
+            "$MERMAID/server, $MERMAID/server_jamstec, "
+            "$MERMAID/server_sustech, $MERMAID/server_stanford, and "
+            "$MERMAID/servers."
+        ),
     )
     parser.add_argument(
         "--dest",

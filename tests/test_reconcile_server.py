@@ -11,6 +11,7 @@ from reconcile_server import (
     DEFAULT_DEST,
     DEFAULT_SOURCES,
     is_candidate_file,
+    parse_args,
     scan_tree,
     parse_out_blocks,
     resolve_group,
@@ -27,6 +28,21 @@ BINARY_STYLE_EXTENSION_CASES = {
     ".000": ".000",
 }
 TEXT_EXTENSION_CASES = (".LOG", ".MER", ".vit")
+
+
+def test_reconcile_help_lists_default_sources(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sys, "argv", ["reconcile_server.py", "--help"])
+
+    try:
+        parse_args()
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("--help did not exit")
+
+    output = capsys.readouterr().out
+    assert "$MERMAID/server_jamstec" in output
+    assert "$MERMAID/server_stanford" in output
 
 
 def make_candidate(path: Path, content: bytes, *, is_dest: bool = False) -> Candidate:
