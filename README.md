@@ -16,6 +16,21 @@ All scripts are intended to be run from the command line on macOS/Linux.
 
 ## Included Scripts
 
+### countsac.py
+
+Report the total number of processed lower-case `.sac` files for each
+instrument, split into detected (`.DET.`) and requested (`.REQ.`) waveforms.
+The report includes the latest UTC start date from each class, read from the
+SAC filename. By default it reads `$MERMAID/processed_everyone`.
+
+```bash
+scripts/countsac.py
+scripts/countsac.py "$MERMAID/processed_everyone"
+scripts/countsac.py "$MERMAID/processed_everyone" IcCycle
+```
+
+The optional second argument excludes any SAC path containing that substring.
+
 ### reconcile_server.py
 
 Conservatively reconcile multiple MERMAID server trees into a single flat
