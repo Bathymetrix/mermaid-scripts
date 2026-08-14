@@ -33,6 +33,14 @@ COUNT_COLUMNS = (
     "SAC_NOEVT_DET",
     "SAC_NOEVT_REQ",
 )
+COUNT_GROUPS = (
+    ("EVT_REV",),
+    ("EVT_ID", "EVT_ID_DET", "EVT_ID_REQ"),
+    ("EVT_NOID", "EVT_NOID_DET", "EVT_NOID_REQ"),
+    ("EVT_UNREV", "EVT_UNREV_DET", "EVT_UNREV_REQ"),
+    ("SAC_NOEVT", "SAC_NOEVT_DET", "SAC_NOEVT_REQ"),
+)
+COLUMN_WIDTHS = {column: max(6, len(column)) for column in COUNT_COLUMNS}
 
 
 @dataclass(frozen=True)
@@ -217,11 +225,7 @@ def count_evt(sacdir: Path, evtdir: Path) -> list[str]:
         total.update(row)
     check_counts("TOTAL", total)
 
-    header = (
-        f"{'SERIAL':>14s}  EVT_REV | EVT_ID EVT_ID_DET EVT_ID_REQ | "
-        "EVT_NOID EVT_NOID_DET EVT_NOID_REQ | EVT_UNREV EVT_UNREV_DET EVT_UNREV_REQ | "
-        "SAC_NOEVT SAC_NOEVT_DET SAC_NOEVT_REQ"
-    )
+    header = format_header()
     lines = [header]
     for instrument in instruments:
         lines.append(format_row(instrument, counts[instrument]))
@@ -247,14 +251,20 @@ def count_evt(sacdir: Path, evtdir: Path) -> list[str]:
 
 def format_row(label: str, counts: Counter[str]) -> str:
     """Format one fixed-width table row."""
-    groups = (
-        ("EVT_REV",), ("EVT_ID", "EVT_ID_DET", "EVT_ID_REQ"),
-        ("EVT_NOID", "EVT_NOID_DET", "EVT_NOID_REQ"),
-        ("EVT_UNREV", "EVT_UNREV_DET", "EVT_UNREV_REQ"),
-        ("SAC_NOEVT", "SAC_NOEVT_DET", "SAC_NOEVT_REQ"),
+    values = (
+        " ".join(f"{counts[column]:>{COLUMN_WIDTHS[column]}d}" for column in group)
+        for group in COUNT_GROUPS
     )
-    values = (" ".join(f"{counts[column]:6d}" for column in group) for group in groups)
     return f"{label:>14s}  " + " | ".join(values)
+
+
+def format_header() -> str:
+    """Format the table header using the same column widths as data rows."""
+    groups = (
+        " ".join(f"{column:>{COLUMN_WIDTHS[column]}s}" for column in group)
+        for group in COUNT_GROUPS
+    )
+    return f"{'SERIAL':>14s}  " + " | ".join(groups)
 
 
 def main() -> None:

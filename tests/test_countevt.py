@@ -51,6 +51,9 @@ def test_counts_clean_categories_no_event_and_instrument_order(tmp_path: Path) -
     assert table_values(lines, second) == [2, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0]
     assert lines.index(next(line for line in lines if first in line)) < lines.index(next(line for line in lines if second in line))
     assert table_values(lines, "TOTAL") == [3, 2, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0]
+    assert [index for index, value in enumerate(lines[0]) if value == "|"] == [
+        index for index, value in enumerate(lines[1]) if value == "|"
+    ]
 
 
 def test_reports_event_exceptions_without_affecting_clean_counts(tmp_path: Path) -> None:
