@@ -15,6 +15,7 @@ from typing import Callable
 
 UNTIMED_MARKER = "UNTIMED"
 _RAW_TIMESTAMP = re.compile(r"^(?P<time>.+?):")
+RENDER_RECORD_VIEWS_VERSION = "0.1.0"
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,10 @@ class RenderedLine:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build flat views from mermaid-records JSONL."
+    )
+    parser.add_argument(
+        "-v", "--version", action="version",
+        version=f"%(prog)s {RENDER_RECORD_VIEWS_VERSION}",
     )
     parser.add_argument(
         "-i",

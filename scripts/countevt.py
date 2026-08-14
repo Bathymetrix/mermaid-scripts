@@ -41,6 +41,7 @@ COUNT_GROUPS = (
     ("SAC_NOEVT", "SAC_NOEVT_DET", "SAC_NOEVT_REQ"),
 )
 COLUMN_WIDTHS = {column: max(6, len(column)) for column in COUNT_COLUMNS}
+COUNTEVT_VERSION = "0.1.0"
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,9 @@ def default_evtdir() -> Path | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "-v", "--version", action="version", version=f"%(prog)s {COUNTEVT_VERSION}"
+    )
     parser.add_argument(
         "-s", "--sacdir", type=Path, default=default_sacdir(),
         help="Processed SAC archive root (default: $MERMAID/processed_everyone).",

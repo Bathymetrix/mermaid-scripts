@@ -126,6 +126,9 @@ def parse_args() -> argparse.Namespace:
         description="Merge MERMAID server files into one flat destination."
     )
     parser.add_argument(
+        "-v", "--version", action="version", version=f"%(prog)s {RECONCILE_SERVER_VERSION}"
+    )
+    parser.add_argument(
         "--src",
         action="append",
         type=Path,

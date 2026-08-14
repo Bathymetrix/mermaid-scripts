@@ -18,6 +18,7 @@ from pathlib import Path
 
 INSTRUMENT_DIRECTORY = re.compile(r".*[0-9]-[A-Z]-[0-9].*")
 SAC_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%S"
+COUNTSAC_VERSION = "0.1.0"
 
 
 def default_processed_dir() -> Path | None:
@@ -28,6 +29,9 @@ def default_processed_dir() -> Path | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "-v", "--version", action="version", version=f"%(prog)s {COUNTSAC_VERSION}"
+    )
     parser.add_argument(
         "procdir",
         nargs="?",
