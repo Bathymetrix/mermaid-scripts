@@ -40,17 +40,18 @@ identified, reviewed unidentified, and unreviewed status, plus SAC files with
 no EVT. DET and REQ subtotals use the SAC filename classification.
 
 ```bash
-scripts/countevt.py --evtdir "$MERMAID/events_everyone"
+scripts/countevt.py
 scripts/countevt.py \
     --sacdir "$MERMAID/processed_everyone" \
     --evtdir "$MERMAID/events_everyone"
 ```
 
-`--sacdir` defaults to `$MERMAID/processed_everyone` when `MERMAID` is set.
-The event archive is explicit and must contain the relevant `reviewed/` and
-`unreviewed/` trees. The report ends with an `EXCEPTIONS` section that lists
-prelim EVT files, EVT files without a matching SAC, reviewed EVT files outside
-the identified/unidentified directories, and duplicate EVT associations.
+`--sacdir` and `--evtdir` default to `$MERMAID/processed_everyone` and
+`$MERMAID/events_everyone`, respectively, when `MERMAID` is set. The event
+archive must contain the relevant `reviewed/` and `unreviewed/` trees. The
+report ends with an `EXCEPTIONS` section that lists prelim EVT files, EVT files
+without a matching SAC, reviewed EVT files outside the identified/unidentified
+directories, and duplicate EVT associations.
 
 ### reconcile_server.py
 

@@ -50,16 +50,25 @@ def default_sacdir() -> Path | None:
     return Path(mermaid_root).expanduser() / "processed_everyone" if mermaid_root else None
 
 
+def default_evtdir() -> Path | None:
+    """Return the conventional event directory when MERMAID is set."""
+    mermaid_root = os.environ.get("MERMAID")
+    return Path(mermaid_root).expanduser() / "events_everyone" if mermaid_root else None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "-s", "--sacdir", type=Path, default=default_sacdir(),
         help="Processed SAC archive root (default: $MERMAID/processed_everyone).",
     )
-    parser.add_argument("-e", "--evtdir", type=Path, required=True, help="Event archive root.")
+    parser.add_argument(
+        "-e", "--evtdir", type=Path, default=default_evtdir(),
+        help="Event archive root (default: $MERMAID/events_everyone).",
+    )
     args = parser.parse_args()
-    if args.sacdir is None:
-        parser.error("--sacdir is required when the MERMAID environment variable is unset")
+    if args.sacdir is None or args.evtdir is None:
+        parser.error("--sacdir and --evtdir are required when the MERMAID environment variable is unset")
     return args
 
 
