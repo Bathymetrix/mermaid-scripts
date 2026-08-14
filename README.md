@@ -31,6 +31,27 @@ scripts/countsac.py "$MERMAID/processed_everyone" IcCycle
 
 The optional second argument excludes any SAC path containing that substring.
 
+### countevt.py
+
+Report EVT coverage of the processed lower-case `.sac` archive for each
+instrument. The SAC inventory is authoritative: the main table counts only
+EVT files whose basenames correspond to a SAC file, split by reviewed
+identified, reviewed unidentified, and unreviewed status, plus SAC files with
+no EVT. DET and REQ subtotals use the SAC filename classification.
+
+```bash
+scripts/countevt.py --evtdir "$MERMAID/events_everyone"
+scripts/countevt.py \
+    --sacdir "$MERMAID/processed_everyone" \
+    --evtdir "$MERMAID/events_everyone"
+```
+
+`--sacdir` defaults to `$MERMAID/processed_everyone` when `MERMAID` is set.
+The event archive is explicit and must contain the relevant `reviewed/` and
+`unreviewed/` trees. The report ends with an `EXCEPTIONS` section that lists
+prelim EVT files, EVT files without a matching SAC, reviewed EVT files outside
+the identified/unidentified directories, and duplicate EVT associations.
+
 ### reconcile_server.py
 
 Conservatively reconcile multiple MERMAID server trees into a single flat
