@@ -10,6 +10,7 @@ from reconcile_server import (
     Candidate,
     DEFAULT_DEST,
     DEFAULT_SOURCES,
+    build_report,
     is_candidate_file,
     parse_args,
     scan_tree,
@@ -43,6 +44,18 @@ def test_reconcile_help_lists_default_sources(monkeypatch, capsys) -> None:
     output = capsys.readouterr().out
     assert "$MERMAID/server_jamstec" in output
     assert "$MERMAID/server_stanford" in output
+
+
+def test_report_includes_shell_quoted_command(tmp_path: Path) -> None:
+    report = build_report(
+        command="reconcile_server.py --src 'source directory' --dry-run",
+        sources=[tmp_path / "source directory"],
+        dest=tmp_path / "destination",
+        dry_run=True,
+        counts=defaultdict(int),
+    )
+
+    assert "command: reconcile_server.py --src 'source directory' --dry-run" in report
 
 
 def make_candidate(path: Path, content: bytes, *, is_dest: bool = False) -> Candidate:

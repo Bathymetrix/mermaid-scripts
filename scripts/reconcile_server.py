@@ -12,14 +12,16 @@ import argparse
 import filecmp
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-RECONCILE_SERVER_VERSION = "0.1.1"
+RECONCILE_SERVER_VERSION = "0.1.2"
 
 MERMAID_ROOT = Path(os.environ["MERMAID"]).expanduser() if "MERMAID" in os.environ else None
 DEFAULT_SOURCES = (
@@ -639,6 +641,7 @@ def format_counts(counts: Counter[str]) -> str:
 
 def build_report(
     *,
+    command: str,
     sources: list[Path],
     dest: Path,
     dry_run: bool,
@@ -647,6 +650,7 @@ def build_report(
     lines = [
         "MERMAID server reconciliation report",
         f"version: {RECONCILE_SERVER_VERSION}",
+        f"command: {command}",
         f"timestamp: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"dry_run: {dry_run}",
         "",
@@ -779,7 +783,13 @@ def main() -> int:
                 resolution.merged_content, dest / basename, dry_run=args.dry_run
             )
 
-    report = build_report(sources=sources, dest=dest, dry_run=args.dry_run, counts=counts)
+    report = build_report(
+        command=shlex.join(sys.argv),
+        sources=sources,
+        dest=dest,
+        dry_run=args.dry_run,
+        counts=counts,
+    )
     review_report = build_review_report(conflicts)
 
     if not args.dry_run:
