@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-RECONCILE_SERVER_VERSION = "0.1.2"
+RECONCILE_SERVER_VERSION = "0.1.3"
 
 MERMAID_ROOT = Path(os.environ["MERMAID"]).expanduser() if "MERMAID" in os.environ else None
 DEFAULT_SOURCES = (
@@ -566,6 +566,27 @@ def resolve_binary_group(basename: str, candidates: list[Candidate]) -> Resoluti
             return Resolution(action="already_current")
         return Resolution(action="copied_identical", winner=first)
 
+    if len(dest_candidates) == 1:
+        destination = dest_candidates[0]
+        destination_content = destination.path.read_bytes()
+        extended_sources = [
+            candidate
+            for candidate in candidates
+            if not candidate.is_dest
+            and candidate.size > destination.size
+            and candidate.path.read_bytes().startswith(destination_content)
+        ]
+        if extended_sources:
+            winner = extended_sources[0]
+            if all(
+                filecmp.cmp(candidate.path, destination.path, shallow=False)
+                or filecmp.cmp(candidate.path, winner.path, shallow=False)
+                for candidate in candidates
+            ):
+                # Exact prefix preservation is the only binary append rule: no
+                # byte already present in the destination may be changed.
+                return Resolution(action="copied_appended_binary", winner=winner)
+
     return Resolution(
         action="conflicts",
         conflict=Conflict(
@@ -630,6 +651,7 @@ def format_counts(counts: Counter[str]) -> str:
         "basenames_considered",
         "copied_single",
         "copied_identical",
+        "copied_appended_binary",
         "merged_disjoint",
         "merged_deduplicated",
         "already_current",

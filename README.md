@@ -61,7 +61,7 @@ processing archive.
 Features:
 
 - Groups files by basename across multiple source trees
-- Copies byte-identical binary files
+- Copies byte-identical binary files and sources that exactly extend the destination
 - Merges compatible text records
 - Detects conflicting records requiring manual review
 - Generates reconciliation, review, and source-status reports

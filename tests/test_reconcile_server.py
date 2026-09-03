@@ -397,6 +397,48 @@ def test_binary_conflict_prefers_source_reference_over_destination_duplicate(
     assert resolution.conflict.difference.right_line == b"clxan\n"
 
 
+def test_binary_source_extending_destination_is_copied(tmp_path: Path) -> None:
+    destination_content = b"\xac}j\x02\x03\x00\x01\x05#*\x8a\x00"
+    dest = make_candidate(
+        tmp_path / "dest" / "0101_6A7261E3.003",
+        destination_content,
+        is_dest=True,
+    )
+    source = make_candidate(
+        tmp_path / "source" / "0101_6A7261E3.003",
+        destination_content + b"\x0b\xac}j\x01\x00#*f\x01",
+    )
+
+    resolution = resolve_group("0101_6A7261E3.003", [source, dest])
+
+    assert resolution.action == "copied_appended_binary"
+    assert resolution.winner == source
+
+
+def test_binary_source_extension_does_not_hide_divergent_source(tmp_path: Path) -> None:
+    destination_content = b"\xac}j\x02\x03\x00\x01\x05#*\x8a\x00"
+    dest = make_candidate(
+        tmp_path / "dest" / "0101_6A7261E3.003",
+        destination_content,
+        is_dest=True,
+    )
+    extended_source = make_candidate(
+        tmp_path / "extended" / "0101_6A7261E3.003",
+        destination_content + b"\x0b\xac}j\x01\x00#*f\x01",
+    )
+    divergent_source = make_candidate(
+        tmp_path / "divergent" / "0101_6A7261E3.003",
+        b"\xac}j\x02\x03\x00\x01\x05#*\x8a\xff",
+    )
+
+    resolution = resolve_group(
+        "0101_6A7261E3.003",
+        [extended_source, divergent_source, dest],
+    )
+
+    assert resolution.action == "conflicts"
+
+
 def test_real_binary_style_examples_conflict_for_each_allowed_extension(
     tmp_path: Path,
 ) -> None:
