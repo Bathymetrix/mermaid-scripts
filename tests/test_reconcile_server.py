@@ -12,6 +12,7 @@ from reconcile_server import (
     DEFAULT_SOURCES,
     build_report,
     is_candidate_file,
+    main,
     parse_args,
     scan_tree,
     parse_out_blocks,
@@ -56,6 +57,36 @@ def test_report_includes_shell_quoted_command(tmp_path: Path) -> None:
     )
 
     assert "command: reconcile_server.py --src 'source directory' --dry-run" in report
+
+
+def test_main_prints_scanned_directories_before_its_report(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "reconcile_server.py",
+            "--src",
+            str(source),
+            "--dest",
+            str(destination),
+            "--dry-run",
+        ],
+    )
+
+    assert main() == 0
+
+    output = capsys.readouterr().out
+    assert f"Scanning source directory: {source.resolve()}" in output
+    assert f"Scanning destination directory: {destination.resolve()}" in output
+    assert output.index("Scanning source directory:") < output.index(
+        "MERMAID server reconciliation report"
+    )
 
 
 def make_candidate(path: Path, content: bytes, *, is_dest: bool = False) -> Candidate:

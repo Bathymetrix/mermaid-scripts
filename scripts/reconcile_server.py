@@ -21,7 +21,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-RECONCILE_SERVER_VERSION = "0.1.3"
+RECONCILE_SERVER_VERSION = "0.1.4"
 
 MERMAID_ROOT = Path(os.environ["MERMAID"]).expanduser() if "MERMAID" in os.environ else None
 DEFAULT_SOURCES = (
@@ -778,10 +778,12 @@ def main() -> int:
     counts: Counter[str] = Counter()
 
     for source in sources:
+        print(f"Scanning source directory: {source}", flush=True)
         counts["ignored_files"] += scan_tree(
             source, is_dest=False, groups=groups, seen=seen
         )
 
+    print(f"Scanning destination directory: {dest}", flush=True)
     counts["ignored_files"] += scan_tree(dest, is_dest=True, groups=groups, seen=seen)
     counts["basenames_considered"] = len(groups)
 
