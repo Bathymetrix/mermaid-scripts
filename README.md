@@ -110,3 +110,9 @@ These scripts prioritize:
 - Reproducibility
 - Minimal dependencies
 - Preservation of original source data
+
+Developed and maintained by [Bathymetrix®](https://bathymetrix.com).
+
+© 2026 Bathymetrix, LLC
+
+Licensed under the MIT License.
