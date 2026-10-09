@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Print MERMAID processed SAC file dates and counts.
-
-This is a command-line implementation of ``countsac.m``.  A MERMAID SAC
-filename begins with its UTC start time (``YYYYMMDDTHHMMSS``); that timestamp
-is used to report the latest DET and REQ waveform for each instrument.
-"""
+"""Report .sac coverage, excluding IcCycle paths by default."""
 
 from __future__ import annotations
 
@@ -18,7 +13,8 @@ from pathlib import Path
 
 INSTRUMENT_DIRECTORY = re.compile(r".*[0-9]-[A-Z]-[0-9].*")
 SAC_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%S"
-COUNTSAC_VERSION = "0.1.0"
+COUNTSAC_VERSION = "0.4.0"
+DEFAULT_EXCLUSION = "IcCycle"
 
 
 def default_processed_dir() -> Path | None:
@@ -33,20 +29,16 @@ def parse_args() -> argparse.Namespace:
         "-v", "--version", action="version", version=f"%(prog)s {COUNTSAC_VERSION}"
     )
     parser.add_argument(
-        "procdir",
-        nargs="?",
-        type=Path,
-        default=default_processed_dir(),
+        "-s", "--sacdir", type=Path, default=default_processed_dir(),
         help="Processed directory (default: $MERMAID/processed_everyone).",
     )
     parser.add_argument(
-        "excl",
-        nargs="?",
-        help="Optional substring: SAC paths containing it are excluded.",
+        "--exclude", default=DEFAULT_EXCLUSION,
+        help=f"Exclude SAC paths containing this substring (default: {DEFAULT_EXCLUSION}).",
     )
     args = parser.parse_args()
-    if args.procdir is None:
-        parser.error("procdir is required when the MERMAID environment variable is unset")
+    if args.sacdir is None:
+        parser.error("--sacdir is required when the MERMAID environment variable is unset")
     return args
 
 
@@ -81,7 +73,7 @@ def latest_date(files: Iterable[Path]) -> str:
     return max(dates).strftime("%d-%b-%Y") if dates else "NaT"
 
 
-def count_sac(procdir: Path, exclusion: str | None = None) -> list[str]:
+def count_sac(procdir: Path, exclusion: str | None = DEFAULT_EXCLUSION) -> list[str]:
     """Return the report lines for processed SAC files below *procdir*."""
     total_sac = total_det = total_req = 0
     lines = ["                   ALL      DET      LAST_DET     REQ       LAST_REQ"]
@@ -114,7 +106,7 @@ def count_sac(procdir: Path, exclusion: str | None = None) -> list[str]:
 
 def main() -> None:
     args = parse_args()
-    print("\n".join(count_sac(args.procdir, args.excl)))
+    print("\n".join(count_sac(args.sacdir, args.exclude)))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report EVT coverage of processed MERMAID SAC files by instrument."""
+"""Report EVT coverage from processed SAC files, excluding IcCycle paths by default."""
 
 from __future__ import annotations
 
@@ -41,7 +41,8 @@ COUNT_GROUPS = (
     ("SAC_NOEVT", "SAC_NOEVT_DET", "SAC_NOEVT_REQ"),
 )
 COLUMN_WIDTHS = {column: max(6, len(column)) for column in COUNT_COLUMNS}
-COUNTEVT_VERSION = "0.2.0"
+COUNTEVT_VERSION = "0.4.0"
+DEFAULT_EXCLUSION = "IcCycle"
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,10 @@ def parse_args() -> argparse.Namespace:
         "-e", "--evtdir", type=Path, default=default_evtdir(),
         help="Event archive root (default: $MERMAID/events_everyone).",
     )
+    parser.add_argument(
+        "--exclude", default=DEFAULT_EXCLUSION,
+        help=f"Exclude SAC paths containing this substring (default: {DEFAULT_EXCLUSION}).",
+    )
     args = parser.parse_args()
     if args.sacdir is None or args.evtdir is None:
         parser.error("--sacdir and --evtdir are required when the MERMAID environment variable is unset")
@@ -113,18 +118,25 @@ def evt_basename(sac_path: Path) -> str:
     return f"{sac_path.name[:-4]}.evt"
 
 
-def sac_inventory(sacdir: Path) -> tuple[list[str], dict[str, SacFile]]:
+def sac_inventory(
+    sacdir: Path, exclusion: str | None = DEFAULT_EXCLUSION
+) -> tuple[list[str], dict[str, SacFile], set[str]]:
     """Build the authoritative, uniquely named SAC inventory."""
     instruments: list[str] = []
     inventory: dict[str, SacFile] = {}
+    excluded_event_names: set[str] = set()
     for directory in instrument_directories(sacdir):
         instruments.append(directory.name)
         for path in sorted(candidate for candidate in directory.rglob("*.sac") if candidate.is_file()):
             name = evt_basename(path)
+            if exclusion and exclusion in str(path):
+                excluded_event_names.add(name)
+                continue
             if name in inventory:
                 raise ValueError(f"SAC basename occurs more than once: {name}")
             inventory[name] = SacFile(path, directory.name, sac_kind(path))
-    return instruments, inventory
+    excluded_event_names.difference_update(inventory)
+    return instruments, inventory, excluded_event_names
 
 
 def event_files(evtdir: Path) -> list[Path]:
@@ -174,9 +186,14 @@ def check_counts(label: str, counts: Counter[str]) -> None:
         raise ValueError(f"EVT_REV does not sum as expected for {label}")
 
 
-def count_evt(sacdir: Path, evtdir: Path, sidecar_dir: Path | None = None) -> list[str]:
+def count_evt(
+    sacdir: Path,
+    evtdir: Path,
+    sidecar_dir: Path | None = None,
+    exclusion: str | None = DEFAULT_EXCLUSION,
+) -> list[str]:
     """Return the complete SAC/EVT coverage report."""
-    instruments, inventory = sac_inventory(sacdir)
+    instruments, inventory, excluded_event_names = sac_inventory(sacdir, exclusion)
     counts = {instrument: empty_counts() for instrument in instruments}
     filenames = {
         instrument: {column: set() for column in COUNT_COLUMNS}
@@ -185,7 +202,10 @@ def count_evt(sacdir: Path, evtdir: Path, sidecar_dir: Path | None = None) -> li
     exceptions: dict[str, list[Path]] = {category: [] for category in EXCEPTION_CATEGORIES[:-1]}
     nonprelim_by_name: dict[str, list[Path]] = defaultdict(list)
 
-    events = event_files(evtdir)
+    events = [
+        path for path in event_files(evtdir)
+        if path.name not in excluded_event_names
+    ]
     for path in events:
         if is_prelim(path):
             exceptions["PRELIM_EVT"].append(path)
@@ -304,7 +324,7 @@ def format_header() -> str:
 
 def main() -> None:
     args = parse_args()
-    print("\n".join(count_evt(args.sacdir, args.evtdir, default_sidecar_dir())))
+    print("\n".join(count_evt(args.sacdir, args.evtdir, default_sidecar_dir(), args.exclude)))
 
 
 if __name__ == "__main__":

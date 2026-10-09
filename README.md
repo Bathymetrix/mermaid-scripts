@@ -25,11 +25,12 @@ SAC filename. By default it reads `$MERMAID/processed_everyone`.
 
 ```bash
 scripts/countsac.py
-scripts/countsac.py "$MERMAID/processed_everyone"
-scripts/countsac.py "$MERMAID/processed_everyone" IcCycle
+scripts/countsac.py --sacdir "$MERMAID/processed_everyone"
+scripts/countsac.py --sacdir "$MERMAID/processed_everyone" --exclude=OtherSubstring
 ```
 
-The optional second argument excludes any SAC path containing that substring.
+SAC paths containing `IcCycle` are excluded by default. `--exclude` replaces
+that exclusion substring; pass `--exclude=` to include all SAC paths.
 
 ### countevt.py
 
@@ -43,7 +44,8 @@ no EVT. DET and REQ subtotals use the SAC filename classification.
 scripts/countevt.py
 scripts/countevt.py \
     --sacdir "$MERMAID/processed_everyone" \
-    --evtdir "$MERMAID/events_everyone"
+    --evtdir "$MERMAID/events_everyone" \
+    --exclude=OtherSubstring
 ```
 
 `--sacdir` and `--evtdir` default to `$MERMAID/processed_everyone` and
@@ -52,6 +54,16 @@ archive must contain the relevant `reviewed/` and `unreviewed/` trees. The
 report ends with an `EXCEPTIONS` section that lists prelim EVT files, EVT files
 without a matching SAC, reviewed EVT files outside the identified/unidentified
 directories, and duplicate EVT associations.
+
+SAC paths containing `IcCycle` are excluded from the inventory by default.
+`--exclude` replaces the exclusion substring; pass `--exclude=` to include all
+SAC paths.
+
+When `MERMAID` is set, the script also writes one directory per instrument
+under `$MERMAID/countevt/`. Each directory contains one `<COLUMN>.txt` file for
+every count column in the table. Each file lists the basenames contributing to
+that count, one per line; empty columns have empty files. Event columns list EVT
+basenames, and `SAC_NOEVT` columns list SAC basenames.
 
 ### reconcile_server.py
 
