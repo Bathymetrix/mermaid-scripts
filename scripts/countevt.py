@@ -41,7 +41,7 @@ COUNT_GROUPS = (
     ("SAC_NOEVT", "SAC_NOEVT_DET", "SAC_NOEVT_REQ"),
 )
 COLUMN_WIDTHS = {column: max(6, len(column)) for column in COUNT_COLUMNS}
-COUNTEVT_VERSION = "0.1.0"
+COUNTEVT_VERSION = "0.2.0"
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,12 @@ def default_evtdir() -> Path | None:
     """Return the conventional event directory when MERMAID is set."""
     mermaid_root = os.environ.get("MERMAID")
     return Path(mermaid_root).expanduser() / "events_everyone" if mermaid_root else None
+
+
+def default_sidecar_dir() -> Path | None:
+    """Return the conventional per-instrument sidecar directory."""
+    mermaid_root = os.environ.get("MERMAID")
+    return Path(mermaid_root).expanduser() / "countevt" if mermaid_root else None
 
 
 def parse_args() -> argparse.Namespace:
@@ -168,10 +174,14 @@ def check_counts(label: str, counts: Counter[str]) -> None:
         raise ValueError(f"EVT_REV does not sum as expected for {label}")
 
 
-def count_evt(sacdir: Path, evtdir: Path) -> list[str]:
+def count_evt(sacdir: Path, evtdir: Path, sidecar_dir: Path | None = None) -> list[str]:
     """Return the complete SAC/EVT coverage report."""
     instruments, inventory = sac_inventory(sacdir)
     counts = {instrument: empty_counts() for instrument in instruments}
+    filenames = {
+        instrument: {column: set() for column in COUNT_COLUMNS}
+        for instrument in instruments
+    }
     exceptions: dict[str, list[Path]] = {category: [] for category in EXCEPTION_CATEGORIES[:-1]}
     nonprelim_by_name: dict[str, list[Path]] = defaultdict(list)
 
@@ -203,13 +213,21 @@ def count_evt(sacdir: Path, evtdir: Path) -> list[str]:
             row["EVT_ID"] += 1
             row[f"EVT_ID_{sac.kind}"] += 1
             row["EVT_REV"] += 1
+            filenames[sac.instrument]["EVT_ID"].add(path.name)
+            filenames[sac.instrument][f"EVT_ID_{sac.kind}"].add(path.name)
+            filenames[sac.instrument]["EVT_REV"].add(path.name)
         elif category == "NOID":
             row["EVT_NOID"] += 1
             row[f"EVT_NOID_{sac.kind}"] += 1
             row["EVT_REV"] += 1
+            filenames[sac.instrument]["EVT_NOID"].add(path.name)
+            filenames[sac.instrument][f"EVT_NOID_{sac.kind}"].add(path.name)
+            filenames[sac.instrument]["EVT_REV"].add(path.name)
         else:
             row["EVT_UNREV"] += 1
             row[f"EVT_UNREV_{sac.kind}"] += 1
+            filenames[sac.instrument]["EVT_UNREV"].add(path.name)
+            filenames[sac.instrument][f"EVT_UNREV_{sac.kind}"].add(path.name)
 
     all_event_names = {path.name for path in events}
     for name, sac in inventory.items():
@@ -217,6 +235,8 @@ def count_evt(sacdir: Path, evtdir: Path) -> list[str]:
             row = counts[sac.instrument]
             row["SAC_NOEVT"] += 1
             row[f"SAC_NOEVT_{sac.kind}"] += 1
+            filenames[sac.instrument]["SAC_NOEVT"].add(sac.path.name)
+            filenames[sac.instrument][f"SAC_NOEVT_{sac.kind}"].add(sac.path.name)
 
     duplicate_details = [
         (name, sorted(paths, key=lambda path: str(path.relative_to(evtdir))))
@@ -228,6 +248,17 @@ def count_evt(sacdir: Path, evtdir: Path) -> list[str]:
     for row in counts.values():
         total.update(row)
     check_counts("TOTAL", total)
+
+    if sidecar_dir is not None:
+        for instrument in instruments:
+            instrument_dir = sidecar_dir / instrument
+            instrument_dir.mkdir(parents=True, exist_ok=True)
+            for column in COUNT_COLUMNS:
+                names = sorted(filenames[instrument][column])
+                content = "\n".join(names)
+                if names:
+                    content += "\n"
+                (instrument_dir / f"{column}.txt").write_text(content, encoding="utf-8")
 
     header = format_header()
     lines = [header]
@@ -273,7 +304,7 @@ def format_header() -> str:
 
 def main() -> None:
     args = parse_args()
-    print("\n".join(count_evt(args.sacdir, args.evtdir)))
+    print("\n".join(count_evt(args.sacdir, args.evtdir, default_sidecar_dir())))
 
 
 if __name__ == "__main__":
