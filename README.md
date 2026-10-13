@@ -70,6 +70,10 @@ basenames, and `SAC_NOEVT` columns list SAC basenames.
 Conservatively reconcile multiple MERMAID server trees into a single flat
 processing archive.
 
+Default inputs are the legacy trees under
+`$MERMAID/legacy/servers/{princeton,jamstec,sustech,stanford}` and the active
+mirrors under `$MERMAID/servers`. The reconciled archive is `$MERMAID/server`.
+
 Features:
 
 - Groups files by basename across multiple source trees
@@ -85,9 +89,10 @@ Example:
 scripts/reconcile_server.py --dry-run
 
 scripts/reconcile_server.py \
-    --src "$MERMAID/server" \
-    --src "$MERMAID/server_jamstec" \
-    --dest "$MERMAID/server_everyone"
+    --src "$MERMAID/legacy/servers/princeton" \
+    --src "$MERMAID/legacy/servers/jamstec" \
+    --src "$MERMAID/servers" \
+    --dest "$MERMAID/server"
 ```
 
 ### render_record_views.py

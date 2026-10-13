@@ -43,8 +43,10 @@ def test_reconcile_help_lists_default_sources(monkeypatch, capsys) -> None:
         raise AssertionError("--help did not exit")
 
     output = capsys.readouterr().out
-    assert "$MERMAID/server_jamstec" in output
-    assert "$MERMAID/server_stanford" in output
+    for name in ("princeton", "jamstec", "sustech", "stanford"):
+        assert f"$MERMAID/legacy/servers/{name}" in output
+    assert "$MERMAID/servers." in output
+    assert "Defaults to $MERMAID/server." in output
 
 
 def test_report_includes_shell_quoted_command(tmp_path: Path) -> None:

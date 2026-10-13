@@ -21,21 +21,21 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-RECONCILE_SERVER_VERSION = "0.1.4"
+RECONCILE_SERVER_VERSION = "0.1.5"
 
 MERMAID_ROOT = Path(os.environ["MERMAID"]).expanduser() if "MERMAID" in os.environ else None
 DEFAULT_SOURCES = (
     [
-        MERMAID_ROOT / "server",
-        MERMAID_ROOT / "server_jamstec",
-        MERMAID_ROOT / "server_sustech",
-        MERMAID_ROOT / "server_stanford",
+        MERMAID_ROOT / "legacy" / "servers" / "princeton",
+        MERMAID_ROOT / "legacy" / "servers" / "jamstec",
+        MERMAID_ROOT / "legacy" / "servers" / "sustech",
+        MERMAID_ROOT / "legacy" / "servers" / "stanford",
         MERMAID_ROOT / "servers",
     ]
     if MERMAID_ROOT is not None
     else []
 )
-DEFAULT_DEST = MERMAID_ROOT / "server_everyone" if MERMAID_ROOT is not None else None
+DEFAULT_DEST = MERMAID_ROOT / "server" if MERMAID_ROOT is not None else None
 
 ALL_EXTENSIONS = {
     ".BIN",
@@ -136,8 +136,8 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help=(
             "Source directory. May be supplied multiple times. Defaults to "
-            "$MERMAID/server, $MERMAID/server_jamstec, "
-            "$MERMAID/server_sustech, $MERMAID/server_stanford, and "
+            "$MERMAID/legacy/servers/princeton, $MERMAID/legacy/servers/jamstec, "
+            "$MERMAID/legacy/servers/sustech, $MERMAID/legacy/servers/stanford, and "
             "$MERMAID/servers."
         ),
     )
@@ -145,7 +145,7 @@ def parse_args() -> argparse.Namespace:
         "--dest",
         type=Path,
         default=DEFAULT_DEST,
-        help="Flat destination directory. Defaults to $MERMAID/server_everyone.",
+        help="Flat destination directory. Defaults to $MERMAID/server.",
     )
     parser.add_argument(
         "--dry-run",
