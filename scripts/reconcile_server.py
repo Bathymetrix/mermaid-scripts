@@ -21,15 +21,16 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-RECONCILE_SERVER_VERSION = "0.1.5"
+RECONCILE_SERVER_VERSION = "0.1.6"
 
 MERMAID_ROOT = Path(os.environ["MERMAID"]).expanduser() if "MERMAID" in os.environ else None
 DEFAULT_SOURCES = (
     [
-        MERMAID_ROOT / "legacy" / "servers" / "princeton",
-        MERMAID_ROOT / "legacy" / "servers" / "jamstec",
-        MERMAID_ROOT / "legacy" / "servers" / "sustech",
-        MERMAID_ROOT / "legacy" / "servers" / "stanford",
+        *sorted(
+            path
+            for path in (MERMAID_ROOT / "legacy" / "servers").glob("*")
+            if path.is_dir()
+        ),
         MERMAID_ROOT / "servers",
     ]
     if MERMAID_ROOT is not None
@@ -136,8 +137,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help=(
             "Source directory. May be supplied multiple times. Defaults to "
-            "$MERMAID/legacy/servers/princeton, $MERMAID/legacy/servers/jamstec, "
-            "$MERMAID/legacy/servers/sustech, $MERMAID/legacy/servers/stanford, and "
+            "all immediate subdirectories of $MERMAID/legacy/servers/ and "
             "$MERMAID/servers."
         ),
     )

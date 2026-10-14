@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -43,10 +45,35 @@ def test_reconcile_help_lists_default_sources(monkeypatch, capsys) -> None:
         raise AssertionError("--help did not exit")
 
     output = capsys.readouterr().out
-    for name in ("princeton", "jamstec", "sustech", "stanford"):
-        assert f"$MERMAID/legacy/servers/{name}" in output
+    assert "all immediate subdirectories of $MERMAID/legacy/servers/" in output
     assert "$MERMAID/servers." in output
     assert "Defaults to $MERMAID/server." in output
+
+
+def test_default_sources_discover_legacy_directories(tmp_path: Path) -> None:
+    legacy = tmp_path / "legacy" / "servers"
+    (legacy / "zeta" / "nested").mkdir(parents=True)
+    (legacy / "alpha").mkdir()
+    (legacy / "notes.txt").write_text("Not a source directory", encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from reconcile_server import DEFAULT_SOURCES; "
+            "print('\\n'.join(str(path) for path in DEFAULT_SOURCES))",
+        ],
+        cwd=Path(__file__).resolve().parents[1] / "scripts",
+        env={**os.environ, "MERMAID": str(tmp_path)},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.splitlines() == [
+        str(legacy / "alpha"),
+        str(legacy / "zeta"),
+        str(tmp_path / "servers"),
+    ]
 
 
 def test_report_includes_shell_quoted_command(tmp_path: Path) -> None:

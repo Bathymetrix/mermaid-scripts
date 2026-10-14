@@ -70,9 +70,10 @@ basenames, and `SAC_NOEVT` columns list SAC basenames.
 Conservatively reconcile multiple MERMAID server trees into a single flat
 processing archive.
 
-Default inputs are the legacy trees under
-`$MERMAID/legacy/servers/{princeton,jamstec,sustech,stanford}` and the active
-mirrors under `$MERMAID/servers`. The reconciled archive is `$MERMAID/server`.
+Default inputs are all immediate subdirectories of `$MERMAID/legacy/servers/`
+(discovered in alphabetical order) and the active mirrors under
+`$MERMAID/servers`. Each input is scanned recursively. The reconciled archive
+is `$MERMAID/server`. Explicit `--src` options replace the default inputs.
 
 Features:
 
