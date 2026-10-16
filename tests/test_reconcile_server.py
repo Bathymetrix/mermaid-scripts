@@ -45,16 +45,14 @@ def test_reconcile_help_lists_default_sources(monkeypatch, capsys) -> None:
         raise AssertionError("--help did not exit")
 
     output = capsys.readouterr().out
-    assert "all immediate subdirectories of $MERMAID/legacy/servers/" in output
-    assert "$MERMAID/servers." in output
+    assert "$MERMAID/legacy/servers and $MERMAID/servers." in output
+    assert "skipping dot directories, tools, __pycache__, _runs, and logs" in " ".join(
+        output.split()
+    )
     assert "Defaults to $MERMAID/server." in output
 
 
-def test_default_sources_discover_legacy_directories(tmp_path: Path) -> None:
-    legacy = tmp_path / "legacy" / "servers"
-    (legacy / "zeta" / "nested").mkdir(parents=True)
-    (legacy / "alpha").mkdir()
-    (legacy / "notes.txt").write_text("Not a source directory", encoding="utf-8")
+def test_default_sources_are_both_server_roots(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -70,10 +68,46 @@ def test_default_sources_discover_legacy_directories(tmp_path: Path) -> None:
     )
 
     assert result.stdout.splitlines() == [
-        str(legacy / "alpha"),
-        str(legacy / "zeta"),
+        str(tmp_path / "legacy" / "servers"),
         str(tmp_path / "servers"),
     ]
+
+
+def test_default_roots_use_same_recursive_scan(tmp_path: Path) -> None:
+    roots = [tmp_path / "legacy" / "servers", tmp_path / "servers"]
+    for index, root in enumerate(roots):
+        make_candidate(root / f"root_{index}.BIN", b"root")
+        make_candidate(root / "mirror" / "station" / f"nested_{index}.BIN", b"nested")
+        for directory in (root, root / "mirror"):
+            for name in (".hidden", "tools", "__pycache__", "_runs", "logs"):
+                make_candidate(directory / name / "nested" / "excluded.BIN", b"excluded")
+
+    destination = tmp_path / "destination"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).resolve().parents[1] / "scripts" / "reconcile_server.py"),
+            "--dest",
+            str(destination),
+            "--dry-run",
+        ],
+        env={**os.environ, "MERMAID": str(tmp_path)},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    scan_lines = [line for line in result.stdout.splitlines() if line.startswith("Scanning ")]
+    assert scan_lines == [
+        *[
+            f"Scanning source directory: {directory}"
+            for root in roots
+            for directory in (root, root / "mirror", root / "mirror" / "station")
+        ],
+        f"Scanning destination directory: {destination}",
+    ]
+    assert "basenames_considered: 4" in result.stdout
+    assert not destination.exists()
 
 
 def test_report_includes_shell_quoted_command(tmp_path: Path) -> None:
@@ -86,6 +120,8 @@ def test_report_includes_shell_quoted_command(tmp_path: Path) -> None:
     )
 
     assert "command: reconcile_server.py --src 'source directory' --dry-run" in report
+    assert "directories starting with '.', or named tools, __pycache__, _runs, or logs" in report
+    assert "entire subtrees excluded from recursive scans and progress output" in report
 
 
 def test_main_prints_scanned_directories_before_its_report(
@@ -95,6 +131,13 @@ def test_main_prints_scanned_directories_before_its_report(
     destination = tmp_path / "destination"
     source.mkdir()
     destination.mkdir()
+    source_nested = source / "mirror" / "station"
+    source_nested.mkdir(parents=True)
+    destination_nested = destination / "nested"
+    destination_nested.mkdir()
+    for directory in (source, source_nested, destination):
+        for name in (".hidden", "tools", "__pycache__", "_runs", "logs"):
+            (directory / name / "nested").mkdir(parents=True)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -111,11 +154,39 @@ def test_main_prints_scanned_directories_before_its_report(
     assert main() == 0
 
     output = capsys.readouterr().out
-    assert f"Scanning source directory: {source.resolve()}" in output
-    assert f"Scanning destination directory: {destination.resolve()}" in output
+    scan_lines = [line for line in output.splitlines() if line.startswith("Scanning ")]
+    assert scan_lines == [
+        f"Scanning source directory: {source.resolve()}",
+        f"Scanning source directory: {source_nested.parent.resolve()}",
+        f"Scanning source directory: {source_nested.resolve()}",
+        f"Scanning destination directory: {destination.resolve()}",
+        f"Scanning destination directory: {destination_nested.resolve()}",
+    ]
     assert output.index("Scanning source directory:") < output.index(
         "MERMAID server reconciliation report"
     )
+
+
+def test_scan_tree_excludes_directory_subtrees(tmp_path: Path, capsys) -> None:
+    visible = make_candidate(tmp_path / "visible" / "visible.BIN", b"visible")
+    toolbox = make_candidate(tmp_path / "toolbox" / "keep.BIN", b"keep")
+    for directory in (tmp_path, tmp_path / "visible"):
+        for name in (".hidden", ".git", "tools", "__pycache__", "_runs", "logs"):
+            make_candidate(directory / name / "nested" / "excluded.BIN", b"excluded")
+
+    for is_dest in (False, True):
+        groups = defaultdict(list)
+        seen = set()
+        assert scan_tree(tmp_path, is_dest=is_dest, groups=groups, seen=seen) == 0
+
+        assert dict(groups) == {
+            "visible.BIN": [Candidate(visible.path, visible.size, is_dest)],
+            "keep.BIN": [Candidate(toolbox.path, toolbox.size, is_dest)],
+        }
+        assert seen == {visible.path, toolbox.path}
+        output = capsys.readouterr().out
+        for name in (".hidden", ".git", "tools", "__pycache__", "_runs", "logs"):
+            assert f"/{name}" not in output
 
 
 def make_candidate(path: Path, content: bytes, *, is_dest: bool = False) -> Candidate:
@@ -409,6 +480,37 @@ def test_source_git_log_reports_plain_directory_as_not_git_repo(
     source.mkdir()
 
     assert source_git_log([source]) == "plain_source\nNot a Git repository\n"
+
+
+def test_source_git_log_preserves_nested_repositories_and_exclusions(
+    tmp_path: Path, monkeypatch
+) -> None:
+    roots = [tmp_path / "legacy" / "servers", tmp_path / "servers"]
+    repositories = []
+    for root in roots:
+        repository = root / "mirror"
+        (repository / ".git").mkdir(parents=True)
+        repositories.append(repository)
+        for name in (".hidden", "tools", "__pycache__", "_runs", "logs"):
+            (root / name / "excluded" / ".git").mkdir(parents=True)
+
+    calls = []
+
+    def fake_run_git(source, args):
+        calls.append((source, args))
+        return subprocess.CompletedProcess(args, 0, stdout="test output\n", stderr="")
+
+    monkeypatch.setattr("reconcile_server.run_git", fake_run_git)
+
+    report = source_git_log(roots)
+
+    assert calls == [
+        (repository, args)
+        for repository in repositories
+        for args in (["rev-parse", "HEAD"], ["status"])
+    ]
+    for repository in repositories:
+        assert str(repository) in report
 
 
 def test_request_conflict_prefers_source_reference_over_destination_duplicate(

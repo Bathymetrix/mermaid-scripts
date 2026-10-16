@@ -17,20 +17,17 @@ import shutil
 import subprocess
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-RECONCILE_SERVER_VERSION = "0.1.6"
+RECONCILE_SERVER_VERSION = "0.1.7"
 
 MERMAID_ROOT = Path(os.environ["MERMAID"]).expanduser() if "MERMAID" in os.environ else None
 DEFAULT_SOURCES = (
     [
-        *sorted(
-            path
-            for path in (MERMAID_ROOT / "legacy" / "servers").glob("*")
-            if path.is_dir()
-        ),
+        MERMAID_ROOT / "legacy" / "servers",
         MERMAID_ROOT / "servers",
     ]
     if MERMAID_ROOT is not None
@@ -52,6 +49,7 @@ TEXT_EXTENSIONS = {".LOG", ".MER", ".vit"}
 OUT_EXTENSION = ".out"
 
 IGNORE_POLICY = [
+    "directories starting with '.', or named tools, __pycache__, _runs, or logs, and their entire subtrees excluded from recursive scans and progress output",
     ".cmd intentionally excluded: operational request history, mutable operational/request files, and not part of the flat processing archive",
     "basenames containing ZMODEM",
     "basenames containing nohup",
@@ -137,8 +135,8 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help=(
             "Source directory. May be supplied multiple times. Defaults to "
-            "all immediate subdirectories of $MERMAID/legacy/servers/ and "
-            "$MERMAID/servers."
+            "$MERMAID/legacy/servers and $MERMAID/servers. Both are scanned "
+            "recursively, skipping dot directories, tools, __pycache__, _runs, and logs."
         ),
     )
     parser.add_argument(
@@ -178,26 +176,41 @@ def is_text_file(basename: str) -> bool:
     return Path(basename).suffix in TEXT_EXTENSIONS
 
 
+def walk_server_tree(root: Path) -> Iterator[tuple[Path, list[str]]]:
+    """Walk in directory-name order, pruning excluded subtrees at every depth."""
+    for directory, subdirectories, filenames in os.walk(root):
+        subdirectories[:] = sorted(
+            name
+            for name in subdirectories
+            if not name.startswith(".")
+            and name not in {"tools", "__pycache__", "_runs", "logs"}
+        )
+        yield Path(directory), filenames
+
+
+def iter_scanned_files(root: Path, *, is_dest: bool) -> Iterator[Path]:
+    """Log visited directories and yield files from the shared tree walk."""
+    directory_role = "destination" if is_dest else "source"
+    print(f"Scanning {directory_role} directory: {root}", flush=True)
+    if root.is_file():
+        yield root
+        return
+
+    for directory, filenames in walk_server_tree(root):
+        if directory != root:
+            print(f"Scanning {directory_role} directory: {directory}", flush=True)
+        for filename in filenames:
+            yield directory / filename
+
+
 def scan_tree(
     root: Path, *, is_dest: bool, groups: dict[str, list[Candidate]], seen: set[Path]
 ) -> int:
-    """Add candidate files below root and return the number of ignored files."""
+    """Log scanned directories, add candidate files, and count ignored files."""
     ignored = 0
-    if not root.exists():
-        return ignored
-
-    if root.is_file():
-        files = [root]
-    else:
-        files = (
-            path
-            for path in root.rglob("*")
-            if path.is_file()
-            and ".git" not in path.parts
-            and "__pycache__" not in path.parts
-        )
-
-    for path in files:
+    for path in iter_scanned_files(root, is_dest=is_dest):
+        if not path.is_file():
+            continue
         resolved = path.resolve()
         if resolved in seen:
             continue
@@ -707,7 +720,17 @@ def has_git_metadata(source: Path) -> bool:
 
 def source_git_log(sources: list[Path]) -> str:
     sections = []
-    for source in sources:
+    git_sources = []
+    for root in sources:
+        # Default roots can contain repositories (notably legacy/servers).
+        repositories = [
+            directory
+            for directory, _ in walk_server_tree(root)
+            if has_git_metadata(directory)
+        ]
+        git_sources.extend(repositories or [root])
+
+    for source in git_sources:
         lines = [str(source)]
         if not has_git_metadata(source):
             lines = [source.name, "Not a Git repository"]
@@ -778,12 +801,10 @@ def main() -> int:
     counts: Counter[str] = Counter()
 
     for source in sources:
-        print(f"Scanning source directory: {source}", flush=True)
         counts["ignored_files"] += scan_tree(
             source, is_dest=False, groups=groups, seen=seen
         )
 
-    print(f"Scanning destination directory: {dest}", flush=True)
     counts["ignored_files"] += scan_tree(dest, is_dest=True, groups=groups, seen=seen)
     counts["basenames_considered"] = len(groups)
 

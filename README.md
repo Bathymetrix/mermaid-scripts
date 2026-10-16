@@ -70,10 +70,18 @@ basenames, and `SAC_NOEVT` columns list SAC basenames.
 Conservatively reconcile multiple MERMAID server trees into a single flat
 processing archive.
 
-Default inputs are all immediate subdirectories of `$MERMAID/legacy/servers/`
-(discovered in alphabetical order) and the active mirrors under
-`$MERMAID/servers`. Each input is scanned recursively. The reconciled archive
-is `$MERMAID/server`. Explicit `--src` options replace the default inputs.
+Default inputs are `$MERMAID/legacy/servers` and `$MERMAID/servers`. Both roots
+use the same recursive traversal, visiting subdirectories in alphabetical order
+and printing every visited directory. Eligible files directly in either root
+are included too. The reconciled archive is `$MERMAID/server`. Explicit `--src`
+options replace the default inputs.
+
+Directory exclusions apply at every depth beneath each source or destination
+root: names starting with `.` (including `.git`), and the exact names `tools`,
+`__pycache__`, `_runs`, and `logs`. These directories and their entire subtrees are
+neither scanned nor printed. The reconciliation report lists these exceptions
+under its ignore policy. Source-status reports include Git repositories found
+within the scanned source trees, including the legacy repositories.
 
 Features:
 
