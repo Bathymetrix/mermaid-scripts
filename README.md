@@ -16,6 +16,38 @@ All scripts are intended to be run from the command line on macOS/Linux.
 
 ## Included Scripts
 
+### rebuild_processed_mirrors.py
+
+Rebuild four flat symlink directories from the processed archive:
+
+| Destination | Source files | Link names |
+| --- | --- | --- |
+| `waveforms/sac/` | `*.sac` | Original basename |
+| `waveforms/mseed/` | `*.mseed` | Original basename |
+| `metadata/geocsv/` | `geo_*.csv` | `<instrument>-<basename>` |
+| `metadata/gps/` | `gps.txt`, `gps.csv` | `<instrument>-<basename>` |
+
+```bash
+scripts/rebuild_processed_mirrors.py
+scripts/rebuild_processed_mirrors.py --processed-dir /path/to/processed --output-dir /path/to/mirrors
+```
+
+Defaults are `$MERMAID/processed` for the source and `$MERMAID` for the output
+root, falling back to `~/mermaid/processed` and `~/mermaid` when `MERMAID` is
+unset. Source traversal is recursive; the instrument prefix is the first
+directory below the processed root. For example,
+`processed/452.020-P-06/geo_DET_REQ.csv` becomes
+`metadata/geocsv/452.020-P-06-geo_DET_REQ.csv`.
+
+Each run replaces all symlinks in these four directories, including stale or
+broken links, with absolute links to the source paths. Matching is case-sensitive,
+and all cycles are included. Duplicate link names, a missing source directory,
+or non-symlink contents in a mirror abort the run before existing links are
+removed. Mirror directories themselves must not be symlinks. Other contents
+of `waveforms/` and `metadata/`, including parent-level `.git/` directories,
+are preserved. Source files are never copied or modified. This script runs
+independently of `automaid`; it does not change its processing workflow.
+
 ### countsac.py
 
 Report the total number of processed lower-case `.sac` files for each
