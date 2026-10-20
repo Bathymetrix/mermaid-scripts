@@ -13,14 +13,14 @@ from pathlib import Path
 
 INSTRUMENT_DIRECTORY = re.compile(r".*[0-9]-[A-Z]-[0-9].*")
 SAC_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%S"
-COUNTSAC_VERSION = "0.4.0"
+COUNTSAC_VERSION = "0.5.0"
 DEFAULT_EXCLUSION = "IcCycle"
 
 
 def default_processed_dir() -> Path | None:
     """Return the conventional processed directory when MERMAID is set."""
     mermaid_root = os.environ.get("MERMAID")
-    return Path(mermaid_root).expanduser() / "processed_everyone" if mermaid_root else None
+    return Path(mermaid_root).expanduser() / "processed" if mermaid_root else None
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "-s", "--sacdir", type=Path, default=default_processed_dir(),
-        help="Processed directory (default: $MERMAID/processed_everyone).",
+        help="Processed directory (default: $MERMAID/processed).",
     )
     parser.add_argument(
         "--exclude", default=DEFAULT_EXCLUSION,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from countevt import count_evt, default_evtdir
+from countevt import count_evt, default_evtdir, default_sacdir
 
 
 def write_file(directory: Path, filename: str) -> None:
@@ -26,10 +26,16 @@ def table_values(lines: list[str], serial: str) -> list[int]:
     return [int(value) for value in line.replace("|", "").split()[1:]]
 
 
+def test_default_sacdir_uses_mermaid_environment(monkeypatch) -> None:
+    monkeypatch.setenv("MERMAID", "/corpus")
+
+    assert default_sacdir() == Path("/corpus/processed")
+
+
 def test_default_evtdir_uses_mermaid_environment(monkeypatch) -> None:
     monkeypatch.setenv("MERMAID", "/corpus")
 
-    assert default_evtdir() == Path("/corpus/events_everyone")
+    assert default_evtdir() == Path("/corpus/events")
 
 
 def test_counts_clean_categories_no_event_and_instrument_order(tmp_path: Path) -> None:

@@ -42,4 +42,4 @@ def test_exclusion_is_a_path_substring(tmp_path: Path) -> None:
 def test_default_processed_dir_uses_mermaid_environment(monkeypatch) -> None:
     monkeypatch.setenv("MERMAID", "/corpus")
 
-    assert default_processed_dir() == Path("/corpus/processed_everyone")
+    assert default_processed_dir() == Path("/corpus/processed")

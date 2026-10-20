@@ -41,7 +41,7 @@ COUNT_GROUPS = (
     ("SAC_NOEVT", "SAC_NOEVT_DET", "SAC_NOEVT_REQ"),
 )
 COLUMN_WIDTHS = {column: max(6, len(column)) for column in COUNT_COLUMNS}
-COUNTEVT_VERSION = "0.4.0"
+COUNTEVT_VERSION = "0.5.0"
 DEFAULT_EXCLUSION = "IcCycle"
 
 
@@ -57,13 +57,13 @@ class SacFile:
 def default_sacdir() -> Path | None:
     """Return the conventional processed directory when MERMAID is set."""
     mermaid_root = os.environ.get("MERMAID")
-    return Path(mermaid_root).expanduser() / "processed_everyone" if mermaid_root else None
+    return Path(mermaid_root).expanduser() / "processed" if mermaid_root else None
 
 
 def default_evtdir() -> Path | None:
     """Return the conventional event directory when MERMAID is set."""
     mermaid_root = os.environ.get("MERMAID")
-    return Path(mermaid_root).expanduser() / "events_everyone" if mermaid_root else None
+    return Path(mermaid_root).expanduser() / "events" if mermaid_root else None
 
 
 def default_sidecar_dir() -> Path | None:
@@ -79,11 +79,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "-s", "--sacdir", type=Path, default=default_sacdir(),
-        help="Processed SAC archive root (default: $MERMAID/processed_everyone).",
+        help="Processed SAC archive root (default: $MERMAID/processed).",
     )
     parser.add_argument(
         "-e", "--evtdir", type=Path, default=default_evtdir(),
-        help="Event archive root (default: $MERMAID/events_everyone).",
+        help="Event archive root (default: $MERMAID/events).",
     )
     parser.add_argument(
         "--exclude", default=DEFAULT_EXCLUSION,

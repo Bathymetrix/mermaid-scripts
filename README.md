@@ -53,12 +53,12 @@ independently of `automaid`; it does not change its processing workflow.
 Report the total number of processed lower-case `.sac` files for each
 instrument, split into detected (`.DET.`) and requested (`.REQ.`) waveforms.
 The report includes the latest UTC start date from each class, read from the
-SAC filename. By default it reads `$MERMAID/processed_everyone`.
+SAC filename. By default it reads `$MERMAID/processed`.
 
 ```bash
 scripts/countsac.py
-scripts/countsac.py --sacdir "$MERMAID/processed_everyone"
-scripts/countsac.py --sacdir "$MERMAID/processed_everyone" --exclude=OtherSubstring
+scripts/countsac.py --sacdir "$MERMAID/processed"
+scripts/countsac.py --sacdir "$MERMAID/processed" --exclude=OtherSubstring
 ```
 
 SAC paths containing `IcCycle` are excluded by default. `--exclude` replaces
@@ -75,13 +75,13 @@ no EVT. DET and REQ subtotals use the SAC filename classification.
 ```bash
 scripts/countevt.py
 scripts/countevt.py \
-    --sacdir "$MERMAID/processed_everyone" \
-    --evtdir "$MERMAID/events_everyone" \
+    --sacdir "$MERMAID/processed" \
+    --evtdir "$MERMAID/events" \
     --exclude=OtherSubstring
 ```
 
-`--sacdir` and `--evtdir` default to `$MERMAID/processed_everyone` and
-`$MERMAID/events_everyone`, respectively, when `MERMAID` is set. The event
+`--sacdir` and `--evtdir` default to `$MERMAID/processed` and
+`$MERMAID/events`, respectively, when `MERMAID` is set. The event
 archive must contain the relevant `reviewed/` and `unreviewed/` trees. The
 report ends with an `EXCEPTIONS` section that lists prelim EVT files, EVT files
 without a matching SAC, reviewed EVT files outside the identified/unidentified
