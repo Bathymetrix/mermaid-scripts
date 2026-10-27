@@ -18,35 +18,54 @@ All scripts are intended to be run from the command line on macOS/Linux.
 
 ### rebuild_processed_mirrors.py
 
-Rebuild four flat symlink directories from the processed archive:
+Rebuild flat waveform and metadata symlink mirrors by calling
+`automaid/scripts/utils.py:rebuild_processed_mirrors`. This command and
+automaid's processing workflow use the same implementation; file selection,
+link naming, collision checks, and mirror replacement are owned by automaid.
+The current shared utility produces six mirrors:
 
 | Destination | Source files | Link names |
 | --- | --- | --- |
 | `waveforms/sac/` | `*.sac` | Original basename |
 | `waveforms/mseed/` | `*.mseed` | Original basename |
-| `metadata/geocsv/` | `geo_*.csv` | `<instrument>-<basename>` |
-| `metadata/gps/` | `gps.txt`, `gps.csv` | `<instrument>-<basename>` |
+| `metadata/geocsv/` | `geo_DET_REQ.csv` | `<instrument>.geocsv` |
+| `metadata/gps/` | `gps.txt`, `gps.csv` | `<instrument>.gps.txt`, `<instrument>.gps.csv` |
+| `metadata/automaid/` | `automaid_metadata_*.csv` | `<instrument>.<basename>` |
+| `metadata/mseed2sac/` | `mseed2sac_metadata_*.csv` | `<instrument>.<basename>` |
 
 ```bash
 scripts/rebuild_processed_mirrors.py
 scripts/rebuild_processed_mirrors.py --processed-dir /path/to/processed --output-dir /path/to/mirrors
 ```
 
-Defaults are `$MERMAID/processed` for the source and `$MERMAID` for the output
-root, falling back to `~/mermaid/processed` and `~/mermaid` when `MERMAID` is
-unset. Source traversal is recursive; the instrument prefix is the first
-directory below the processed root. For example,
-`processed/452.020-P-06/geo_DET_REQ.csv` becomes
-`metadata/geocsv/452.020-P-06-geo_DET_REQ.csv`.
+The automaid checkout is located through `$AUTOMAID`, falling back to a sibling
+`automaid/` checkout beside `mermaid-scripts/`. The wrapper uses automaid's
+`.venv/bin/python` when present, otherwise the interpreter running the wrapper.
+That interpreter must provide automaid's dependencies, including NumPy, Plotly,
+and ObsPy, because importing `utils.py` loads them. The wrapper imports only
+the utility module and does not run automaid's processing entry point.
 
-Each run replaces all symlinks in these four directories, including stale or
-broken links, with absolute links to the source paths. Matching is case-sensitive,
-and all cycles are included. Duplicate link names, a missing source directory,
-or non-symlink contents in a mirror abort the run before existing links are
-removed. Mirror directories themselves must not be symlinks. Other contents
-of `waveforms/` and `metadata/`, including parent-level `.git/` directories,
-are preserved. Source files are never copied or modified. This script runs
-independently of `automaid`; it does not change its processing workflow.
+The default source is `$MERMAID/processed`, falling back to
+`~/mermaid/processed` when `MERMAID` is unset. The default mirror root is
+`$MERMAID` (or `~/mermaid`) when `--processed-dir` is omitted, is the literal
+`processed`, or resolves to the default source directory. For other source
+paths, mirrors are created inside the specified processed directory.
+`--output-dir` overrides the mirror root in every case. These path rules are
+unchanged from version 0.2.0.
+
+The shared utility traverses sources recursively and takes the instrument ID
+from the first directory below the processed root. Each run replaces all links
+in its six mirror directories, including stale or broken links, with absolute
+links to source paths. Matching is case-sensitive and includes all cycles.
+Duplicate link names, a missing source directory, or non-symlink contents in a
+mirror abort the run before existing links are removed. Mirror directories
+themselves must not be symlinks. Parent-level `.git/` directories are preserved;
+source files are never copied or modified.
+
+Version 0.3.0 delegates all rebuilding to automaid and adds its automaid and
+mseed2sac metadata mirrors to the standalone command. GeoCSV and GPS naming
+remain as in version 0.2.0. The command prints a completion message after a
+successful rebuild; the shared utility does not return per-mirror counts.
 
 ### countsac.py
 

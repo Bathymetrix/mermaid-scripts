@@ -1,24 +1,45 @@
 #!/usr/bin/env python3
-"""Rebuild flat waveform and metadata symlink mirrors from processed files."""
+"""Rebuild processed mirrors using automaid's shared mirror utility."""
 
 from __future__ import annotations
 
 import argparse
 import os
 from pathlib import Path
+import subprocess
+import sys
 
 
-REBUILD_PROCESSED_MIRRORS_VERSION = "0.2.0"
-MIRROR_DIRECTORIES = (
-    "waveforms/sac",
-    "waveforms/mseed",
-    "metadata/geocsv",
-    "metadata/gps",
-)
+REBUILD_PROCESSED_MIRRORS_VERSION = "0.3.0"
+
+# Import utils in a separate interpreter: it loads automaid's scientific
+# dependencies, which are not required by the other mermaid-scripts utilities.
+_REBUILD_COMMAND = """\
+import sys
+sys.path.insert(0, sys.argv[1])
+try:
+    from utils import rebuild_processed_mirrors
+except ImportError as error:
+    raise SystemExit(
+        f"Cannot import automaid's mirror utility: {error}. "
+        "Run with automaid's dependencies installed in its .venv or the active Python environment."
+    ) from error
+try:
+    rebuild_processed_mirrors(sys.argv[2], sys.argv[3])
+except (OSError, ValueError) as error:
+    raise SystemExit(str(error)) from error
+"""
 
 
 def mermaid_root() -> Path:
     return Path(os.environ.get("MERMAID") or "~/mermaid").expanduser()
+
+
+def automaid_root() -> Path:
+    """Locate the automaid checkout, conventionally beside mermaid-scripts."""
+    return Path(
+        os.environ.get("AUTOMAID") or Path(__file__).resolve().parents[2] / "automaid"
+    ).expanduser().resolve()
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,99 +59,26 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def raise_walk_error(error: OSError) -> None:
-    """Abort on an unreadable source subtree rather than build a partial mirror."""
-    raise error
-
-
-def discover_sources(
-    processed_dir: Path, output_dir: Path,
-) -> dict[str, dict[str, Path]]:
-    """Collect all link names before changing any destination."""
-    if not processed_dir.is_dir():
-        raise ValueError(f"Processed directory does not exist: {processed_dir}")
-    sources: dict[str, dict[str, Path]] = {name: {} for name in MIRROR_DIRECTORIES}
-    destinations = {output_dir / name for name in MIRROR_DIRECTORIES}
-    for destination in destinations:
-        if processed_dir.is_relative_to(destination.resolve()):
-            raise ValueError(f"Source archive is inside a mirror: {destination}")
-
-    for directory, subdirectories, filenames in os.walk(
-        processed_dir, onerror=raise_walk_error,
-    ):
-        directory = Path(directory)
-        # Permit outputs under processed/, without rediscovering generated links.
-        subdirectories[:] = sorted(
-            name for name in subdirectories
-            if (directory / name).resolve() not in destinations
+def rebuild_processed_mirrors(processed_dir: Path, output_dir: Path) -> None:
+    """Delegate rebuilding to automaid without importing its processing entry point."""
+    automaid_dir = automaid_root()
+    scripts_dir = automaid_dir / "scripts"
+    if not (scripts_dir / "utils.py").is_file():
+        raise FileNotFoundError(
+            f"automaid utility not found: {scripts_dir / 'utils.py'}. "
+            "Set AUTOMAID to the automaid checkout root."
         )
-        for filename in sorted(filenames):
-            source = directory / filename
-            if source.suffix == ".sac":
-                mirror = "waveforms/sac"
-            elif source.suffix == ".mseed":
-                mirror = "waveforms/mseed"
-            elif filename == "geo_DET_REQ.csv":
-                mirror = "metadata/geocsv"
-            elif filename in {"gps.txt", "gps.csv"}:
-                mirror = "metadata/gps"
-            else:
-                continue
-            if not source.is_file():
-                continue
-
-            if mirror.startswith("metadata/"):
-                relative_parts = source.relative_to(processed_dir).parts
-                if len(relative_parts) < 2:
-                    raise ValueError(f"Metadata has no instrument directory: {source}")
-                instrument_id = relative_parts[0]
-                if mirror == "metadata/geocsv":
-                    link_name = f"{instrument_id}.geocsv"
-                else:
-                    link_name = f"{instrument_id}.gps{source.suffix}"
-            else:
-                link_name = filename
-
-            previous_source = sources[mirror].get(link_name)
-            if previous_source is not None:
-                raise ValueError(
-                    f"Multiple files share {mirror}/{link_name}: "
-                    f"{previous_source} and {source}"
-                )
-            sources[mirror][link_name] = source
-    return sources
-
-
-def rebuild_processed_mirrors(
-    processed_dir: Path, output_dir: Path,
-) -> dict[str, int]:
-    """Replace links in all mirrors, refusing to remove non-symlink data."""
-    processed_dir = processed_dir.expanduser().resolve()
-    output_dir = output_dir.expanduser().resolve()
-    sources = discover_sources(processed_dir, output_dir)
-
-    # Preflight every destination before removing any previous links.
-    for mirror in sources:
-        destination = output_dir / mirror
-        if destination.is_symlink():
-            raise ValueError(f"Mirror directory must not be a symlink: {destination}")
-        if destination.exists():
-            if not destination.is_dir():
-                raise ValueError(f"Mirror path is not a directory: {destination}")
-            for entry in destination.iterdir():
-                if not entry.is_symlink():
-                    raise ValueError(f"Refusing to remove non-symlink: {entry}")
-
-    counts: dict[str, int] = {}
-    for mirror, files in sources.items():
-        destination = output_dir / mirror
-        destination.mkdir(parents=True, exist_ok=True)
-        for entry in destination.iterdir():
-            entry.unlink()
-        for filename, source in files.items():
-            (destination / filename).symlink_to(source)
-        counts[mirror] = len(files)
-    return counts
+    python = automaid_dir / ".venv/bin/python"
+    if not python.is_file():
+        python = Path(sys.executable)
+    subprocess.run(
+        [
+            str(python), "-B", "-c", _REBUILD_COMMAND, str(scripts_dir),
+            str(processed_dir.expanduser().resolve()),
+            str(output_dir.expanduser().resolve()),
+        ],
+        check=True,
+    )
 
 
 def main() -> None:
@@ -155,12 +103,12 @@ def main() -> None:
         output_dir = processed_dir
 
     try:
-        counts = rebuild_processed_mirrors(processed_dir, output_dir)
+        rebuild_processed_mirrors(processed_dir, output_dir)
+    except subprocess.CalledProcessError as error:
+        raise SystemExit(error.returncode) from error
     except (OSError, ValueError) as error:
         raise SystemExit(str(error)) from error
-    output_dir = output_dir.expanduser().resolve()
-    for mirror, count in counts.items():
-        print(f"{output_dir / mirror}: {count} symlinks")
+    print(f"Rebuilt processed mirrors under {output_dir.expanduser().resolve()}")
 
 
 if __name__ == "__main__":

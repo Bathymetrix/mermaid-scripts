@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -7,115 +9,123 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from rebuild_processed_mirrors import MIRROR_DIRECTORIES, rebuild_processed_mirrors
+from rebuild_processed_mirrors import automaid_root, rebuild_processed_mirrors
 
 
-def write_file(path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("source data\n")
-    return path
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/rebuild_processed_mirrors.py"
 
 
-def test_rebuilds_waveforms_and_prefixed_metadata(tmp_path: Path) -> None:
-    processed = tmp_path / "processed"
-    instrument = processed / "452.020-P-06"
-    files = {
-        "waveforms/sac/record.sac": instrument / "cycle" / "record.sac",
-        "waveforms/mseed/record.mseed": instrument / "cycle" / "record.mseed",
-        "metadata/geocsv/452.020-P-06-geo_DET_REQ.csv": instrument / "geo_DET_REQ.csv",
-        "metadata/gps/452.020-P-06-gps.txt": instrument / "gps.txt",
-        "metadata/gps/452.020-P-06-gps.csv": instrument / "gps.csv",
-        "metadata/gps/452.120-S-0081-gps.csv": processed / "452.120-S-0081" / "gps.csv",
-    }
-    for source in files.values():
-        write_file(source)
-    write_file(instrument / "gps_interpolation.txt")
-    write_file(instrument / "geo_REQ-CLASHES.md")
-    write_file(instrument / "upper.SAC")
-    stale = tmp_path / "metadata/gps/stale.txt"
-    stale.parent.mkdir(parents=True)
-    stale.symlink_to(tmp_path / "missing")
-    git_file = write_file(tmp_path / "waveforms/.git/keep")
-
-    counts = rebuild_processed_mirrors(processed, tmp_path)
-
-    assert counts == {
-        "waveforms/sac": 1, "waveforms/mseed": 1,
-        "metadata/geocsv": 1, "metadata/gps": 3,
-    }
-    assert not stale.is_symlink()
-    assert git_file.read_text() == "source data\n"
-    for name, source in files.items():
-        link = tmp_path / name
-        assert link.is_symlink()
-        assert link.readlink() == source
-        assert link.read_text() == "source data\n"
-
-    # A subsequent rebuild must remove links whose sources disappeared.
-    (instrument / "gps.txt").unlink()
-    assert rebuild_processed_mirrors(processed, tmp_path)["metadata/gps"] == 2
-    assert not (tmp_path / "metadata/gps/452.020-P-06-gps.txt").is_symlink()
+@pytest.fixture
+def automaid_checkout(tmp_path: Path, monkeypatch) -> Path:
+    """Provide a utility that records delegation without duplicating mirror logic."""
+    checkout = tmp_path / "automaid checkout"
+    scripts = checkout / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "utils.py").write_text(
+        "import json\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "def rebuild_processed_mirrors(processed_path, mirror_base_path):\n"
+        "    output = Path(mirror_base_path)\n"
+        "    output.mkdir(parents=True, exist_ok=True)\n"
+        "    (output / 'called.json').write_text(json.dumps(\n"
+        "        [processed_path, mirror_base_path, sys.executable]))\n"
+    )
+    (scripts / "main.py").write_text("raise RuntimeError('Processing must not run')\n")
+    monkeypatch.setenv("AUTOMAID", str(checkout))
+    monkeypatch.setenv("MERMAID", str(tmp_path / "mermaid"))
+    return checkout
 
 
-@pytest.mark.parametrize("filename", ["same.sac", "same.mseed", "geo_DET.csv", "gps.csv"])
-def test_collisions_leave_existing_mirrors_intact(tmp_path: Path, filename: str) -> None:
-    processed = tmp_path / "processed"
-    instrument = processed / "452.020-P-06"
-    write_file(instrument / "one" / filename)
-    write_file(instrument / "two" / filename)
-    stale = tmp_path / "waveforms/sac/stale.sac"
-    stale.parent.mkdir(parents=True)
-    stale.symlink_to(tmp_path / "missing")
-
-    with pytest.raises(ValueError, match="Multiple files share"):
-        rebuild_processed_mirrors(processed, tmp_path)
-
-    assert stale.is_symlink()
+def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True,
+    )
 
 
-def test_nested_outputs_are_not_rediscovered(tmp_path: Path) -> None:
-    processed = tmp_path / "processed"
-    write_file(processed / "452.020-P-06/cycle/record.sac")
-    write_file(processed / "452.020-P-06/gps.csv")
+def test_explicit_paths_are_forwarded_to_utils(automaid_checkout: Path, tmp_path: Path) -> None:
+    processed = tmp_path / "custom processed"
+    output = tmp_path / "custom mirrors"
 
-    first_counts = rebuild_processed_mirrors(processed, processed)
+    result = run_cli("-p", str(processed), "-o", str(output))
 
-    assert rebuild_processed_mirrors(processed, processed) == first_counts
-    assert first_counts["metadata/gps"] == 1
-    assert first_counts["waveforms/sac"] == 1
-
-
-def test_non_symlink_data_is_preserved_before_any_rebuild(tmp_path: Path) -> None:
-    processed = tmp_path / "processed"
-    write_file(processed / "452.020-P-06/record.sac")
-    stale = tmp_path / "waveforms/sac/stale.sac"
-    stale.parent.mkdir(parents=True)
-    stale.symlink_to(tmp_path / "missing")
-    data = write_file(tmp_path / "metadata/gps/keep.txt")
-
-    with pytest.raises(ValueError, match="Refusing to remove non-symlink"):
-        rebuild_processed_mirrors(processed, tmp_path)
-
-    assert stale.is_symlink()
-    assert data.read_text() == "source data\n"
+    assert result.returncode == 0, result.stderr
+    assert json.loads((output / "called.json").read_text()) == [
+        str(processed), str(output), sys.executable,
+    ]
+    assert result.stdout == f"Rebuilt processed mirrors under {output}\n"
+    assert not (automaid_checkout / "scripts/__pycache__").exists()
 
 
-def test_missing_source_does_not_clear_existing_mirror(tmp_path: Path) -> None:
-    stale = tmp_path / "waveforms/sac/stale.sac"
-    stale.parent.mkdir(parents=True)
-    stale.symlink_to(tmp_path / "missing")
+@pytest.mark.parametrize("source_option", ["omitted", "default_path", "relative", "custom"])
+def test_cli_preserves_source_and_output_defaults(
+    automaid_checkout: Path, tmp_path: Path, monkeypatch, source_option: str,
+) -> None:
+    root = tmp_path / "mermaid"
+    monkeypatch.chdir(tmp_path)
+    processed = root / "processed"
+    output = root
+    args: list[str] = []
+    if source_option == "default_path":
+        args = ["-p", str(processed)]
+    elif source_option == "relative":
+        args = ["-p", "processed"]
+        processed = tmp_path / "processed"
+    elif source_option == "custom":
+        processed = tmp_path / "custom"
+        output = processed
+        args = ["-p", str(processed)]
 
-    with pytest.raises(ValueError, match="Processed directory does not exist"):
-        rebuild_processed_mirrors(tmp_path / "missing", tmp_path)
+    result = run_cli(*args)
 
-    assert stale.is_symlink()
+    assert result.returncode == 0, result.stderr
+    assert json.loads((output / "called.json").read_text())[:2] == [
+        str(processed), str(output),
+    ]
 
 
-def test_empty_archive_creates_all_mirrors(tmp_path: Path) -> None:
-    processed = tmp_path / "processed"
-    processed.mkdir()
+def test_uses_automaid_virtual_environment(
+    automaid_checkout: Path, tmp_path: Path, monkeypatch,
+) -> None:
+    python = automaid_checkout / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(sys.executable)
+    output = tmp_path / "mirrors"
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: calls.append(command))
 
-    assert rebuild_processed_mirrors(processed, tmp_path) == {
-        name: 0 for name in MIRROR_DIRECTORIES
-    }
-    assert all((tmp_path / name).is_dir() for name in MIRROR_DIRECTORIES)
+    rebuild_processed_mirrors(tmp_path / "processed", output)
+
+    assert calls[0][0] == str(python)
+
+
+def test_shared_utility_failure_is_reported_without_success_message(
+    automaid_checkout: Path, tmp_path: Path,
+) -> None:
+    (automaid_checkout / "scripts/utils.py").write_text(
+        "def rebuild_processed_mirrors(processed_path, mirror_base_path):\n"
+        "    raise ValueError('Duplicate mirror filename')\n"
+    )
+
+    result = run_cli("-o", str(tmp_path / "mirrors"))
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == "Duplicate mirror filename"
+    assert result.stdout == ""
+
+
+def test_missing_checkout_has_actionable_error(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AUTOMAID", str(tmp_path / "missing"))
+
+    result = run_cli("-p", str(tmp_path / "processed"), "-o", str(tmp_path / "mirrors"))
+
+    assert result.returncode == 1
+    assert "Set AUTOMAID to the automaid checkout root" in result.stderr
+    assert result.stdout == ""
+    assert not (tmp_path / "mirrors").exists()
+
+
+def test_unset_automaid_uses_sibling_checkout(monkeypatch) -> None:
+    monkeypatch.delenv("AUTOMAID", raising=False)
+
+    assert automaid_root() == SCRIPT.parents[2] / "automaid"
