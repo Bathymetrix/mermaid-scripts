@@ -62,10 +62,35 @@ mirror abort the run before existing links are removed. Mirror directories
 themselves must not be symlinks. Parent-level `.git/` directories are preserved;
 source files are never copied or modified.
 
-Version 0.3.0 delegates all rebuilding to automaid and adds its automaid and
-mseed2sac metadata mirrors to the standalone command. GeoCSV and GPS naming
-remain as in version 0.2.0. The command prints a completion message after a
-successful rebuild; the shared utility does not return per-mirror counts.
+The CLI wrapper requires Git to inspect the source directory. If the source
+belongs to a Git working tree, the entire owning repository must be clean:
+no staged or unstaged changes, deleted files, untracked files, or dirty
+submodules. Files ignored by Git do not count as untracked files. The check
+runs before rebuilding or updating provenance, with no special exemptions for
+mirror outputs. When outputs are inside the source repository, they must also
+satisfy its normal tracking or ignore policy on subsequent runs. Sources
+outside Git repositories are allowed. This cleanliness requirement applies
+only to this wrapper; automaid's processing workflow is unchanged.
+
+After a successful rebuild, the wrapper writes identical `provenance.json`
+files in the output root's `metadata/` and `waveforms/` directories. Each file
+is replaced on each successful run and contains:
+
+| Field | Meaning |
+| --- | --- |
+| `automaid_version` | Version reported by the automaid utility loaded for this rebuild |
+| `cli_version` | Version of `rebuild_processed_mirrors.py` |
+| `source_directory` | Absolute, symlink-resolved path to the byte-owning processed archive |
+| `source_git_commit` | Full HEAD commit ID of the source's owning repository, or `null` outside Git or before its first commit |
+
+Each provenance file is replaced atomically after rebuilding, rather than
+appended as a history log. A rejected source or failed shared rebuild leaves
+previous provenance unchanged.
+
+Version 0.4.0 adds source cleanliness checks and provenance records. Mirror
+selection and naming remain delegated to automaid. The command prints a
+completion message after success; the shared utility does not return
+per-mirror counts.
 
 ### countsac.py
 

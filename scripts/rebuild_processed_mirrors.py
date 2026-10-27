@@ -10,22 +10,42 @@ import subprocess
 import sys
 
 
-REBUILD_PROCESSED_MIRRORS_VERSION = "0.3.0"
+REBUILD_PROCESSED_MIRRORS_VERSION = "0.4.0"
 
 # Import utils in a separate interpreter: it loads automaid's scientific
 # dependencies, which are not required by the other mermaid-scripts utilities.
 _REBUILD_COMMAND = """\
+import json
+import os
+from pathlib import Path
 import sys
+import tempfile
 sys.path.insert(0, sys.argv[1])
 try:
-    from utils import rebuild_processed_mirrors
+    from utils import rebuild_processed_mirrors, version as automaid_version
 except ImportError as error:
     raise SystemExit(
         f"Cannot import automaid's mirror utility: {error}. "
         "Run with automaid's dependencies installed in its .venv or the active Python environment."
     ) from error
 try:
+    provenance = json.dumps({
+        "automaid_version": automaid_version,
+        "cli_version": sys.argv[4],
+        "source_directory": sys.argv[2],
+        "source_git_commit": sys.argv[5] or None,
+    }, indent=2) + "\\n"
     rebuild_processed_mirrors(sys.argv[2], sys.argv[3])
+    for name in ("metadata", "waveforms"):
+        directory = Path(sys.argv[3]) / name
+        directory.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(dir=directory, prefix=".provenance-")
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(provenance)
+            os.replace(temporary, directory / "provenance.json")
+        finally:
+            Path(temporary).unlink(missing_ok=True)
 except (OSError, ValueError) as error:
     raise SystemExit(str(error)) from error
 """
@@ -59,8 +79,47 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def source_git_commit(processed_dir: Path) -> str | None:
+    """Require a clean owning Git worktree and return its HEAD, if available."""
+    if not processed_dir.is_dir():
+        raise ValueError(f"Processed directory does not exist: {processed_dir}")
+    command = ["git", "--no-optional-locks", "-C", str(processed_dir)]
+    environment = {**os.environ, "LC_ALL": "C"}
+    repository = subprocess.run(
+        [*command, "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True, env=environment,
+    )
+    if repository.returncode:
+        if "not a git repository" in repository.stderr:
+            return None
+        raise ValueError(f"Cannot inspect source Git repository: {repository.stderr.strip()}")
+
+    status = subprocess.run(
+        [*command, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none"],
+        capture_output=True, text=True, env=environment,
+    )
+    if status.returncode:
+        raise ValueError(f"Cannot check source Git status: {status.stderr.strip()}")
+    if status.stdout:
+        raise ValueError(
+            f"Source repository must be clean: {repository.stdout.strip()}\n"
+            f"{status.stdout.rstrip()}"
+        )
+
+    commit = subprocess.run(
+        [*command, "rev-parse", "--verify", "--quiet", "HEAD"],
+        capture_output=True, text=True, env=environment,
+    )
+    if commit.returncode not in (0, 1):
+        raise ValueError(f"Cannot read source Git commit: {commit.stderr.strip()}")
+    return commit.stdout.strip() or None
+
+
 def rebuild_processed_mirrors(processed_dir: Path, output_dir: Path) -> None:
-    """Delegate rebuilding to automaid without importing its processing entry point."""
+    """Check source cleanliness, delegate rebuilding, and record provenance."""
+    processed_dir = processed_dir.expanduser().resolve()
+    output_dir = output_dir.expanduser().resolve()
+    commit = source_git_commit(processed_dir)
     automaid_dir = automaid_root()
     scripts_dir = automaid_dir / "scripts"
     if not (scripts_dir / "utils.py").is_file():
@@ -74,8 +133,8 @@ def rebuild_processed_mirrors(processed_dir: Path, output_dir: Path) -> None:
     subprocess.run(
         [
             str(python), "-B", "-c", _REBUILD_COMMAND, str(scripts_dir),
-            str(processed_dir.expanduser().resolve()),
-            str(output_dir.expanduser().resolve()),
+            str(processed_dir), str(output_dir),
+            REBUILD_PROCESSED_MIRRORS_VERSION, commit or "",
         ],
         check=True,
     )
