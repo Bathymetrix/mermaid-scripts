@@ -31,10 +31,15 @@ def automaid_checkout(tmp_path: Path, monkeypatch) -> Path:
         "from pathlib import Path\n"
         "version = 'v-test'\n"
         "def rebuild_processed_mirrors(processed_path, mirror_base_path):\n"
+        "    global output\n"
         "    output = Path(mirror_base_path)\n"
         "    output.mkdir(parents=True, exist_ok=True)\n"
         "    (output / 'called.json').write_text(json.dumps(\n"
         "        [processed_path, mirror_base_path, sys.executable]))\n"
+        "def make_processed_read_only(processed_path):\n"
+        "    assert (output / 'metadata/provenance.json').read_bytes() == (\n"
+        "        output / 'waveforms/provenance.json').read_bytes()\n"
+        "    (output / 'read-only-call.json').write_text(json.dumps(processed_path))\n"
     )
     (scripts / "main.py").write_text("raise RuntimeError('Processing must not run')\n")
     monkeypatch.setenv("AUTOMAID", str(checkout))
@@ -73,6 +78,7 @@ def test_explicit_paths_are_forwarded_to_utils(automaid_checkout: Path, tmp_path
         "source_directory": str(processed),
         "source_git_commit": None,
     }
+    assert json.loads((output / "read-only-call.json").read_text()) == str(processed)
 
 
 @pytest.mark.parametrize("source_option", ["omitted", "default_path", "relative", "custom"])
@@ -133,6 +139,8 @@ def test_shared_utility_failure_is_reported_without_success_message(
         "version = 'v-test'\n"
         "def rebuild_processed_mirrors(processed_path, mirror_base_path):\n"
         "    raise ValueError('Duplicate mirror filename')\n"
+        "def make_processed_read_only(processed_path):\n"
+        "    raise AssertionError('Protection must not run after a failed rebuild')\n"
     )
     (tmp_path / "mermaid/processed").mkdir(parents=True)
     output = tmp_path / "mirrors"
@@ -147,6 +155,29 @@ def test_shared_utility_failure_is_reported_without_success_message(
     assert result.stdout == ""
     for directory in ("metadata", "waveforms"):
         assert (output / directory / "provenance.json").read_text() == "previous provenance\n"
+
+
+def test_protection_failure_is_reported_without_success_message(
+    automaid_checkout: Path, tmp_path: Path,
+) -> None:
+    utility = automaid_checkout / "scripts/utils.py"
+    utility.write_text(
+        utility.read_text()
+        + "\ndef make_processed_read_only(processed_path):\n"
+        "    raise PermissionError('Cannot protect processed tree')\n"
+    )
+    processed = tmp_path / "processed"
+    processed.mkdir()
+    output = tmp_path / "mirrors"
+
+    result = run_cli("-p", str(processed), "-o", str(output))
+
+    assert result.returncode == 1
+    assert result.stderr.strip() == "Cannot protect processed tree"
+    assert result.stdout == ""
+    assert (output / "called.json").exists()
+    assert (output / "metadata/provenance.json").is_file()
+    assert (output / "waveforms/provenance.json").is_file()
 
 
 def test_missing_checkout_has_actionable_error(tmp_path: Path, monkeypatch) -> None:

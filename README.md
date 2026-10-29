@@ -87,10 +87,19 @@ Each provenance file is replaced atomically after rebuilding, rather than
 appended as a history log. A rejected source or failed shared rebuild leaves
 previous provenance unchanged.
 
-Version 0.4.0 adds source cleanliness checks and provenance records. Mirror
-selection and naming remain delegated to automaid. The command prints a
-completion message after success; the shared utility does not return
-per-mirror counts.
+After rebuilding and writing both provenance files, the wrapper calls
+`utils.make_processed_read_only(processed_dir)`. This removes owner, group,
+and other write permissions from all non-symlink files and directories in the
+canonical processed tree, including its `.git/` directory when present.
+Symlinks are not followed. Canonical files are therefore read-only through
+their mirror links as well. Mirror directories outside the processed tree
+remain writable for subsequent rebuilds. If protection fails, the command
+exits unsuccessfully without printing its completion message.
+
+Version 0.5.0 adds the final processed-tree protection step. Mirror selection,
+naming, and permission handling remain delegated to automaid. The command
+prints a completion message after success; the shared utility does not
+return per-mirror counts.
 
 ### countsac.py
 

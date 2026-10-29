@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 
-REBUILD_PROCESSED_MIRRORS_VERSION = "0.4.0"
+REBUILD_PROCESSED_MIRRORS_VERSION = "0.5.0"
 
 # Import utils in a separate interpreter: it loads automaid's scientific
 # dependencies, which are not required by the other mermaid-scripts utilities.
@@ -22,7 +22,11 @@ import sys
 import tempfile
 sys.path.insert(0, sys.argv[1])
 try:
-    from utils import rebuild_processed_mirrors, version as automaid_version
+    from utils import (
+        make_processed_read_only,
+        rebuild_processed_mirrors,
+        version as automaid_version,
+    )
 except ImportError as error:
     raise SystemExit(
         f"Cannot import automaid's mirror utility: {error}. "
@@ -46,6 +50,7 @@ try:
             os.replace(temporary, directory / "provenance.json")
         finally:
             Path(temporary).unlink(missing_ok=True)
+    make_processed_read_only(sys.argv[2])
 except (OSError, ValueError) as error:
     raise SystemExit(str(error)) from error
 """
@@ -116,7 +121,7 @@ def source_git_commit(processed_dir: Path) -> str | None:
 
 
 def rebuild_processed_mirrors(processed_dir: Path, output_dir: Path) -> None:
-    """Check source cleanliness, delegate rebuilding, and record provenance."""
+    """Check source cleanliness, rebuild mirrors, record provenance, and protect sources."""
     processed_dir = processed_dir.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
     commit = source_git_commit(processed_dir)
