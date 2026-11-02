@@ -22,7 +22,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-RECONCILE_SERVER_VERSION = "0.1.7"
+RECONCILE_SERVER_VERSION = "0.2.0"
 
 MERMAID_ROOT = Path(os.environ["MERMAID"]).expanduser() if "MERMAID" in os.environ else None
 DEFAULT_SOURCES = (
@@ -662,6 +662,9 @@ def write_bytes_if_changed(content: bytes, dest: Path, *, dry_run: bool) -> None
 def format_counts(counts: Counter[str]) -> str:
     keys = [
         "basenames_considered",
+        "skipped_same_stem_logs",
+        "deleted_same_stem_logs",
+        "would_delete_same_stem_logs",
         "copied_single",
         "copied_identical",
         "copied_appended_binary",
@@ -681,6 +684,9 @@ def build_report(
     dest: Path,
     dry_run: bool,
     counts: Counter[str],
+    skipped_same_stem_logs: tuple[str, ...] = (),
+    deleted_same_stem_logs: tuple[str, ...] = (),
+    would_delete_same_stem_logs: tuple[str, ...] = (),
 ) -> str:
     lines = [
         "MERMAID server reconciliation report",
@@ -702,6 +708,16 @@ def build_report(
     )
     lines.extend(f"  - {rule}" for rule in IGNORE_POLICY)
     lines.extend(["", "counts:", format_counts(counts), ""])
+    for heading, names in (
+        ("same-stem LOGs skipped (matching BIN present):", skipped_same_stem_logs),
+        ("same-stem destination LOGs deleted:", deleted_same_stem_logs),
+        ("same-stem destination LOGs to delete (dry run):", would_delete_same_stem_logs),
+    ):
+        lines.append(heading)
+        lines.extend(f"  {name}" for name in names)
+        if not names:
+            lines.append("  (none)")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -792,6 +808,9 @@ def main() -> int:
         raise SystemExit("MERMAID is not set. Provide --dest or set MERMAID.")
     sources = [expand_path(path) for path in (args.src or DEFAULT_SOURCES)]
     dest = expand_path(args.dest)
+    for source in sources:
+        if source.is_relative_to(dest) or dest.is_relative_to(source):
+            raise SystemExit(f"Destination must not overlap source: {dest} and {source}")
 
     if not args.dry_run:
         dest.mkdir(parents=True, exist_ok=True)
@@ -807,10 +826,20 @@ def main() -> int:
 
     counts["ignored_files"] += scan_tree(dest, is_dest=True, groups=groups, seen=seen)
     counts["basenames_considered"] = len(groups)
+    bin_stems = {Path(name).stem for name in groups if name.endswith(".BIN")}
 
     conflicts: list[Conflict] = []
+    skipped_same_stem_logs: list[str] = []
 
     for basename in sorted(groups):
+        if basename.endswith(".LOG") and Path(basename).stem in bin_stems:
+            source_log_paths = [
+                str(candidate.path) for candidate in groups[basename]
+                if not candidate.is_dest
+            ]
+            skipped_same_stem_logs.extend(source_log_paths)
+            counts["skipped_same_stem_logs"] += len(source_log_paths)
+            continue
         candidates = groups[basename]
         resolution = resolve_group(basename, candidates)
         counts[resolution.action] += 1
@@ -828,12 +857,28 @@ def main() -> int:
                 resolution.merged_content, dest / basename, dry_run=args.dry_run
             )
 
+    deleted_same_stem_logs: list[str] = []
+    would_delete_same_stem_logs: list[str] = []
+    for log_path in sorted(dest.glob("*.LOG")):
+        if not log_path.is_file() or log_path.stem not in bin_stems:
+            continue
+        if args.dry_run:
+            would_delete_same_stem_logs.append(str(log_path))
+            counts["would_delete_same_stem_logs"] += 1
+        else:
+            log_path.unlink()
+            deleted_same_stem_logs.append(str(log_path))
+            counts["deleted_same_stem_logs"] += 1
+
     report = build_report(
         command=shlex.join(sys.argv),
         sources=sources,
         dest=dest,
         dry_run=args.dry_run,
         counts=counts,
+        skipped_same_stem_logs=tuple(skipped_same_stem_logs),
+        deleted_same_stem_logs=tuple(deleted_same_stem_logs),
+        would_delete_same_stem_logs=tuple(would_delete_same_stem_logs),
     )
     review_report = build_review_report(conflicts)
 

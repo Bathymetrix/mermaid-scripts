@@ -176,6 +176,12 @@ Features:
 - Detects conflicting records requiring manual review
 - Generates reconciliation, review, and source-status reports
 - Never silently overwrites conflicting content
+- Skips `.LOG` files whenever a same-stem `.BIN` exists in the scanned sources
+  or destination. After reconciliation, removes matching legacy `.LOG` files
+  from the flat destination. The report lists the full source path of each skipped
+  LOG and the full destination path of each deletion;
+  `--dry-run` lists planned deletions without removing files. The destination
+  must not overlap any source directory.
 
 Example:
 

@@ -110,6 +110,79 @@ def test_default_roots_use_same_recursive_scan(tmp_path: Path) -> None:
     assert not destination.exists()
 
 
+def test_same_stem_log_is_skipped_and_legacy_destination_log_deleted(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    source = tmp_path / "source"
+    other_source = tmp_path / "other_source"
+    dest = tmp_path / "destination"
+    make_candidate(source / "30_ABC.BIN", b"binary")
+    make_candidate(source / "30_ABC.LOG", b"source log")
+    make_candidate(other_source / "30_ABC.LOG", b"another source log")
+    make_candidate(source / "30_DEF.LOG", b"independent log")
+    make_candidate(dest / "30_ABC.LOG", b"legacy decoded log")
+    monkeypatch.setattr(
+        sys, "argv", ["reconcile_server.py", "--src", str(source),
+                      "--src", str(other_source), "--dest", str(dest)]
+    )
+
+    assert main() == 0
+
+    assert (dest / "30_ABC.BIN").read_bytes() == b"binary"
+    assert not (dest / "30_ABC.LOG").exists()
+    assert (dest / "30_DEF.LOG").read_bytes() == b"independent log"
+    report = (dest / "reconcile_report.txt").read_text()
+    assert "skipped_same_stem_logs: 2" in report
+    assert "deleted_same_stem_logs: 1" in report
+    assert f"same-stem LOGs skipped (matching BIN present):\n  {source / '30_ABC.LOG'}" in report
+    assert f"  {other_source / '30_ABC.LOG'}" in report
+    assert f"same-stem destination LOGs deleted:\n  {dest / '30_ABC.LOG'}" in report
+    assert report in capsys.readouterr().out
+
+
+def test_dry_run_reports_same_stem_log_without_deleting(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    source = tmp_path / "source"
+    dest = tmp_path / "destination"
+    make_candidate(source / "30_ABC.BIN", b"binary")
+    make_candidate(source / "30_ABC.LOG", b"source log")
+    legacy = make_candidate(dest / "30_ABC.LOG", b"legacy decoded log")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["reconcile_server.py", "--src", str(source), "--dest", str(dest), "--dry-run"],
+    )
+
+    assert main() == 0
+
+    assert legacy.path.read_bytes() == b"legacy decoded log"
+    assert not (dest / "30_ABC.BIN").exists()
+    assert not (dest / "reconcile_report.txt").exists()
+    output = capsys.readouterr().out
+    assert "skipped_same_stem_logs: 1" in output
+    assert f"same-stem LOGs skipped (matching BIN present):\n  {source / '30_ABC.LOG'}" in output
+    assert "would_delete_same_stem_logs: 1" in output
+    assert f"same-stem destination LOGs to delete (dry run):\n  {legacy.path}" in output
+
+
+def test_destination_cannot_overlap_source(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    make_candidate(source / "30_ABC.BIN", b"binary")
+    make_candidate(source / "30_ABC.LOG", b"source log")
+    monkeypatch.setattr(
+        sys, "argv", ["reconcile_server.py", "--src", str(source), "--dest", str(source)]
+    )
+
+    try:
+        main()
+    except SystemExit as error:
+        assert "Destination must not overlap source" in str(error)
+    else:
+        raise AssertionError("overlapping source and destination accepted")
+    assert (source / "30_ABC.LOG").exists()
+
+
 def test_report_includes_shell_quoted_command(tmp_path: Path) -> None:
     report = build_report(
         command="reconcile_server.py --src 'source directory' --dry-run",
