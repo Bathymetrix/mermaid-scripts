@@ -99,3 +99,44 @@ def test_reports_event_exceptions_without_affecting_clean_counts(tmp_path: Path)
     assert lines[duplicate_index + 2:duplicate_index + 4] == [
         f"    reviewed/identified/{duplicate}", f"    unreviewed/{duplicate}",
     ]
+
+
+def test_exclusions_ignore_case_in_sac_and_event_paths(tmp_path: Path) -> None:
+    sacdir, evtdir = tmp_path / "sac", tmp_path / "evt"
+    instrument = "452.020-P-0002"
+    write_file(sacdir / instrument, sac_name("DET", "kept"))
+    write_file(evtdir / "reviewed" / "identified", evt_name("DET", "kept"))
+    for index, marker in enumerate(("IcCycle", "iCcYcLe", "Init", "iNiT")):
+        # Ordinary EVT names are also excluded when their only SAC lives in an
+        # excluded cycle. Excluded EVT paths must not become orphan exceptions.
+        write_file(sacdir / instrument / (str(index) + marker), sac_name("REQ", str(index)))
+        write_file(evtdir / "unreviewed", evt_name("REQ", str(index)))
+        write_file(sacdir / instrument, sac_name("REQ", f"{index}-{marker}"))
+        write_file(evtdir / "unreviewed", evt_name("REQ", f"{index}-{marker}"))
+        write_file(evtdir / "reviewed" / marker, evt_name("REQ", f"orphan{index}"))
+
+    lines = count_evt(sacdir, evtdir)
+    assert table_values(lines, instrument) == [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    assert not any("orphan" in line for line in lines)
+    assert table_values(count_evt(sacdir, evtdir, exclusion=""), instrument)[7] == 8
+    assert table_values(count_evt(sacdir, evtdir, exclusion="INIT"), instrument)[7] == 4
+
+
+def test_regular_copy_keeps_event_with_excluded_sac_duplicate(tmp_path: Path) -> None:
+    sacdir, evtdir = tmp_path / "sac", tmp_path / "evt"
+    instrument = "452.020-P-0002"
+    write_file(sacdir / instrument, sac_name("DET", "kept"))
+    write_file(sacdir / instrument / "0000iNiT", sac_name("DET", "kept"))
+    write_file(evtdir / "reviewed" / "identified", evt_name("DET", "kept"))
+
+    assert table_values(count_evt(sacdir, evtdir), instrument)[1] == 1
+
+
+def test_cli_exclusions_can_replace_defaults_or_include_all(monkeypatch) -> None:
+    from countevt import parse_args
+
+    base = ["countevt", "--sacdir", "/corpus", "--evtdir", "/events"]
+    monkeypatch.setattr(sys, "argv", base + ["--exclude", "IcCycle", "Init"])
+    assert parse_args().exclude == ["IcCycle", "Init"]
+    monkeypatch.setattr(sys, "argv", base + ["--exclude="])
+    assert parse_args().exclude == [""]

@@ -114,8 +114,14 @@ scripts/countsac.py --sacdir "$MERMAID/processed"
 scripts/countsac.py --sacdir "$MERMAID/processed" --exclude=OtherSubstring
 ```
 
-SAC paths containing `IcCycle` are excluded by default. `--exclude` replaces
-that exclusion substring; pass `--exclude=` to include all SAC paths.
+SAC paths containing `IcCycle` or `Init` are excluded by default, ignoring
+case. `--exclude` replaces the default substrings; pass `--exclude=` to include
+all SAC paths.
+
+Both count scripts are version 0.6.0. Exclusions match substrings in directory
+components and filenames beneath each instrument (SAC) or event root (EVT),
+case-insensitively. For example, `--exclude IcCycle Init OtherSubstring` selects
+three literal substrings; `--exclude=` retains the explicit include-all option.
 
 ### countevt.py
 
@@ -140,9 +146,9 @@ report ends with an `EXCEPTIONS` section that lists prelim EVT files, EVT files
 without a matching SAC, reviewed EVT files outside the identified/unidentified
 directories, and duplicate EVT associations.
 
-SAC paths containing `IcCycle` are excluded from the inventory by default.
-`--exclude` replaces the exclusion substring; pass `--exclude=` to include all
-SAC paths.
+SAC paths containing `IcCycle` or `Init` are excluded from the inventory by
+default, ignoring case. EVT paths use the same rule. `--exclude` replaces
+the default substrings; pass `--exclude=` to include all SAC and EVT paths.
 
 When `MERMAID` is set, the script also writes one directory per instrument
 under `$MERMAID/countevt/`. Each directory contains one `<COLUMN>.txt` file for

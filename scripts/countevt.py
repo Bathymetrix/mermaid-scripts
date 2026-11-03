@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report EVT coverage from processed SAC files, excluding IcCycle paths by default."""
+"""Report EVT coverage from processed SAC files, excluding IcCycle and Init paths by default."""
 
 from __future__ import annotations
 
@@ -41,8 +41,8 @@ COUNT_GROUPS = (
     ("SAC_NOEVT", "SAC_NOEVT_DET", "SAC_NOEVT_REQ"),
 )
 COLUMN_WIDTHS = {column: max(6, len(column)) for column in COUNT_COLUMNS}
-COUNTEVT_VERSION = "0.5.0"
-DEFAULT_EXCLUSION = "IcCycle"
+COUNTEVT_VERSION = "0.6.0"
+DEFAULT_EXCLUSION = ("IcCycle", "Init")
 
 
 @dataclass(frozen=True)
@@ -86,13 +86,19 @@ def parse_args() -> argparse.Namespace:
         help="Event archive root (default: $MERMAID/events).",
     )
     parser.add_argument(
-        "--exclude", default=DEFAULT_EXCLUSION,
-        help=f"Exclude SAC paths containing this substring (default: {DEFAULT_EXCLUSION}).",
+        "--exclude", nargs="+", default=DEFAULT_EXCLUSION,
+        help="Exclude paths containing any listed substring, case-insensitively (default: IcCycle Init).",
     )
     args = parser.parse_args()
     if args.sacdir is None or args.evtdir is None:
         parser.error("--sacdir and --evtdir are required when the MERMAID environment variable is unset")
     return args
+
+
+def is_excluded(path: Path, exclusion: str | tuple[str, ...] | list[str] | None) -> bool:
+    """Match any exclusion substring without regard to case."""
+    markers = (exclusion,) if isinstance(exclusion, str) else exclusion or ()
+    return any(marker and marker.casefold() in str(path).casefold() for marker in markers)
 
 
 def instrument_directories(sacdir: Path) -> list[Path]:
@@ -119,7 +125,7 @@ def evt_basename(sac_path: Path) -> str:
 
 
 def sac_inventory(
-    sacdir: Path, exclusion: str | None = DEFAULT_EXCLUSION
+    sacdir: Path, exclusion: str | tuple[str, ...] | list[str] | None = DEFAULT_EXCLUSION
 ) -> tuple[list[str], dict[str, SacFile], set[str]]:
     """Build the authoritative, uniquely named SAC inventory."""
     instruments: list[str] = []
@@ -129,7 +135,7 @@ def sac_inventory(
         instruments.append(directory.name)
         for path in sorted(candidate for candidate in directory.rglob("*.sac") if candidate.is_file()):
             name = evt_basename(path)
-            if exclusion and exclusion in str(path):
+            if is_excluded(path.relative_to(directory), exclusion):
                 excluded_event_names.add(name)
                 continue
             if name in inventory:
@@ -190,7 +196,7 @@ def count_evt(
     sacdir: Path,
     evtdir: Path,
     sidecar_dir: Path | None = None,
-    exclusion: str | None = DEFAULT_EXCLUSION,
+    exclusion: str | tuple[str, ...] | list[str] | None = DEFAULT_EXCLUSION,
 ) -> list[str]:
     """Return the complete SAC/EVT coverage report."""
     instruments, inventory, excluded_event_names = sac_inventory(sacdir, exclusion)
@@ -205,6 +211,7 @@ def count_evt(
     events = [
         path for path in event_files(evtdir)
         if path.name not in excluded_event_names
+        and not is_excluded(path.relative_to(evtdir), exclusion)
     ]
     for path in events:
         if is_prelim(path):

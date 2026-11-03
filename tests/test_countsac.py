@@ -43,3 +43,24 @@ def test_default_processed_dir_uses_mermaid_environment(monkeypatch) -> None:
     monkeypatch.setenv("MERMAID", "/corpus")
 
     assert default_processed_dir() == Path("/corpus/processed")
+
+
+def test_default_exclusions_ignore_case_in_directories_and_filenames(tmp_path: Path) -> None:
+    instrument = tmp_path / "452.020-P-0026"
+    write_sac(instrument, "20230301T054423.a.MER.DET.WLT5.sac")
+    for index, marker in enumerate(("IcCycle", "iCcYcLe", "Init", "iNiT")):
+        write_sac(instrument / (str(index) + marker), "20240102T200156.a.MER.REQ.WLT5.sac")
+        write_sac(instrument, f"20240102T200156.{index}-{marker}.MER.REQ.WLT5.sac")
+
+    assert count_sac(tmp_path)[-1] == "TOTAL :              1        1                     0"
+    assert count_sac(tmp_path, "")[-1] == "TOTAL :              9        1                     8"
+    assert count_sac(tmp_path, "INIT")[-1] == "TOTAL :              5        1                     4"
+
+
+def test_cli_exclusions_can_replace_defaults_or_include_all(monkeypatch) -> None:
+    from countsac import parse_args
+
+    monkeypatch.setattr(sys, "argv", ["countsac", "--sacdir", "/corpus", "--exclude", "IcCycle", "Init"])
+    assert parse_args().exclude == ["IcCycle", "Init"]
+    monkeypatch.setattr(sys, "argv", ["countsac", "--sacdir", "/corpus", "--exclude="])
+    assert parse_args().exclude == [""]

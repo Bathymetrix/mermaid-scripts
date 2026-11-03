@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report .sac coverage, excluding IcCycle paths by default."""
+"""Report .sac coverage, excluding IcCycle and Init paths by default."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from pathlib import Path
 
 INSTRUMENT_DIRECTORY = re.compile(r".*[0-9]-[A-Z]-[0-9].*")
 SAC_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%S"
-COUNTSAC_VERSION = "0.5.0"
-DEFAULT_EXCLUSION = "IcCycle"
+COUNTSAC_VERSION = "0.6.0"
+DEFAULT_EXCLUSION = ("IcCycle", "Init")
 
 
 def default_processed_dir() -> Path | None:
@@ -33,13 +33,19 @@ def parse_args() -> argparse.Namespace:
         help="Processed directory (default: $MERMAID/processed).",
     )
     parser.add_argument(
-        "--exclude", default=DEFAULT_EXCLUSION,
-        help=f"Exclude SAC paths containing this substring (default: {DEFAULT_EXCLUSION}).",
+        "--exclude", nargs="+", default=DEFAULT_EXCLUSION,
+        help="Exclude paths containing any listed substring, case-insensitively (default: IcCycle Init).",
     )
     args = parser.parse_args()
     if args.sacdir is None:
         parser.error("--sacdir is required when the MERMAID environment variable is unset")
     return args
+
+
+def is_excluded(path: Path, exclusion: str | tuple[str, ...] | list[str] | None) -> bool:
+    """Match any exclusion substring without regard to case."""
+    markers = (exclusion,) if isinstance(exclusion, str) else exclusion or ()
+    return any(marker and marker.casefold() in str(path).casefold() for marker in markers)
 
 
 def instrument_directories(procdir: Path) -> list[Path]:
@@ -54,11 +60,10 @@ def instrument_directories(procdir: Path) -> list[Path]:
     )
 
 
-def sac_files(directory: Path, exclusion: str | None = None) -> list[Path]:
+def sac_files(directory: Path, exclusion: str | tuple[str, ...] | list[str] | None = None) -> list[Path]:
     """Return matching ``.sac`` files recursively, optionally excluding paths."""
     files = sorted(path for path in directory.rglob("*.sac") if path.is_file())
-    if exclusion:
-        files = [path for path in files if exclusion not in str(path)]
+    files = [path for path in files if not is_excluded(path.relative_to(directory), exclusion)]
     return files
 
 
@@ -73,7 +78,7 @@ def latest_date(files: Iterable[Path]) -> str:
     return max(dates).strftime("%d-%b-%Y") if dates else "NaT"
 
 
-def count_sac(procdir: Path, exclusion: str | None = DEFAULT_EXCLUSION) -> list[str]:
+def count_sac(procdir: Path, exclusion: str | tuple[str, ...] | list[str] | None = DEFAULT_EXCLUSION) -> list[str]:
     """Return the report lines for processed SAC files below *procdir*."""
     total_sac = total_det = total_req = 0
     lines = ["                   ALL      DET      LAST_DET     REQ       LAST_REQ"]
